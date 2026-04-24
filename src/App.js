@@ -25,21 +25,19 @@ async function fetchOuraData(token) {
 
 function buildChartData(ouraData) {
   const days = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
-  const sleepMap = {};
-  const readinessMap = {};
-  const activityMap = {};
+  const sleepMap = {}, readinessMap = {}, activityMap = {};
 
   (ouraData.sleep?.data || []).forEach(d => {
-    const day = days[new Date(d.day).getDay()];
-    sleepMap[day] = Math.round((d.contributors?.total_sleep || 0) * 9 / 100 * 10) / 10;
+    const day = days[new Date(d.day + "T12:00:00").getDay()];
+    sleepMap[day] = d.score || 0;
   });
   (ouraData.readiness?.data || []).forEach(d => {
-    const day = days[new Date(d.day).getDay()];
+    const day = days[new Date(d.day + "T12:00:00").getDay()];
     readinessMap[day] = d.contributors?.hrv_balance || 0;
   });
   (ouraData.activity?.data || []).forEach(d => {
-    const day = days[new Date(d.day).getDay()];
-    activityMap[day] = { steps: d.steps || 0, cal: d.active_calories || 0 };
+    const day = days[new Date(d.day + "T12:00:00").getDay()];
+    activityMap[day] = { steps: d.steps || 0, cal: d.total_calories || 0 };
   });
 
   return ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(day => ({
