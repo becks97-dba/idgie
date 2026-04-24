@@ -5,21 +5,33 @@ import { useState, useRef, useEffect } from "react";
 async function fetchOuraData(token) {
   const today = new Date().toISOString().split("T")[0];
   const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().split("T")[0];
+  
+  // Use corsproxy.io to bypass browser CORS restrictions
+  const proxy = "https://api.allorigins.win/raw?url=";
+  const base = "https://api.ouraring.com/v2/usercollection";
+  const headers = { Authorization: `Bearer ${token}` };
 
-  const endpoints = ["daily_sleep", "daily_readiness", "daily_activity", "workout"];
-  const keys = ["sleep", "readiness", "activity", "workouts"];
+  const urls = {
+    sleep: `${base}/daily_sleep?start_date=${weekAgo}&end_date=${today}`,
+    readiness: `${base}/daily_readiness?start_date=${weekAgo}&end_date=${today}`,
+    activity: `${base}/daily_activity?start_date=${weekAgo}&end_date=${today}`,
+    workouts: `${base}/workout?start_date=${weekAgo}&end_date=${today}`,
+  };
+
   const results = {};
-
-  for (let i = 0; i < endpoints.length; i++) {
+  for (const [key, url] of Object.entries(urls)) {
     try {
-      const res = await fetch(
-        `/.netlify/functions/oura?endpoint=${endpoints[i]}&start_date=${weekAgo}&end_date=${today}`
-      );
-      results[keys[i]] = await res.json();
+      const res = await fetch(proxy + encodeURIComponent(url), { headers });
+      if (!res.ok) {
+        results[key] = { error: `HTTP ${res.status}`, data: [] };
+      } else {
+        results[key] = await res.json();
+      }
     } catch (e) {
-      results[keys[i]] = { error: e.message, data: [] };
+      results[key] = { error: e.message, data: [] };
     }
   }
+
   return results;
 }
 
@@ -27,17 +39,48 @@ function buildChartData(ouraData) {
   const days = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
   const sleepMap = {}, readinessMap = {}, activityMap = {};
 
-  (ouraData.sleep?.data || []).forEach(d => {
+  const sleepItems = Array.isArray(ouraData.sleep?.data) ? ouraData.sleep.data : [];
+  const readinessItems = Array.isArray(ouraData.readiness?.data) ? ouraData.readiness.data : [];
+  const activityItems = Array.isArray(ouraData.activity?.data) ? ouraData.activity.data : [];
+
+  sleepItems.forEach(d => {
+    if (!d?.day) return;
     const day = days[new Date(d.day + "T12:00:00").getDay()];
     sleepMap[day] = d.score || 0;
   });
-  (ouraData.readiness?.data || []).forEach(d => {
+  readinessItems.forEach(d => {
+    if (!d?.day) return;
     const day = days[new Date(d.day + "T12:00:00").getDay()];
     readinessMap[day] = d.contributors?.hrv_balance || 0;
   });
-  (ouraData.activity?.data || []).forEach(d => {
+  activityItems.forEach(d => {
+    if (!d?.day) return;
     const day = days[new Date(d.day + "T12:00:00").getDay()];
     activityMap[day] = { steps: d.steps || 0, cal: d.total_calories || 0 };
+  });
+
+  return ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(day => ({
+    day,
+    hrv: readinessMap[day] || 0,
+    sleep: sleepMap[day] || 0,
+    steps: activityMap[day]?.steps || 0,
+    cal: activityMap[day]?.cal || 0,
+  }));
+};
+  const readinessMap = {};
+  const activityMap = {};
+
+  (ouraData.sleep?.data || []).forEach(d => {
+    const day = days[new Date(d.day).getDay()];
+    sleepMap[day] = Math.round((d.contributors?.total_sleep || 0) * 9 / 100 * 10) / 10;
+  });
+  (ouraData.readiness?.data || []).forEach(d => {
+    const day = days[new Date(d.day).getDay()];
+    readinessMap[day] = d.contributors?.hrv_balance || 0;
+  });
+  (ouraData.activity?.data || []).forEach(d => {
+    const day = days[new Date(d.day).getDay()];
+    activityMap[day] = { steps: d.steps || 0, cal: d.active_calories || 0 };
   });
 
   return ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(day => ({
@@ -514,12 +557,18 @@ Respond ONLY in valid JSON:
               </div>
 
               <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 12 }}>
-                {[
-                  { label: "HRV", value: "63", unit: "ms", delta: "+18ms", up: true, color: TEAL, badge: null },
-                  { label: "Sleep", value: "8.2", unit: "hrs", delta: "+0.4h", up: true, color: BLUE, badge: null },
-                  { label: "Steps", value: "5.2K", unit: "today", delta: "+480 vs Oura", up: true, color: PURPLE, badge: "Watch ↑" },
-                  { label: "Active cal", value: "1,900", unit: "kcal", delta: "+95 vs Oura", up: true, color: AMBER, badge: "Watch ↑" },
-                ].map(m => (
+                {(() => {
+                  const todayActivity = ouraData?.activity?.data?.slice(-1)[0];
+                  const todayReadiness = ouraData?.readiness?.data?.slice(-1)[0];
+                  const todaySleep = ouraData?.sleep?.data?.slice(-1)[0];
+                  const liveStats = [
+                    { label: "HRV", value: todayReadiness ? `${todayReadiness.contributors?.hrv_balance || "--"}` : "85", unit: "ms", delta: "Oura readiness", up: true, color: TEAL, badge: ouraData ? "Live" : null },
+                    { label: "Sleep", value: todaySleep ? `${todaySleep.score || "--"}` : "84", unit: "score", delta: "Oura sleep score", up: true, color: BLUE, badge: ouraData ? "Live" : null },
+                    { label: "Steps", value: todayActivity ? `${(todayActivity.steps || 0).toLocaleString()}` : "5,877", unit: "today", delta: `Target ${(todayActivity?.target_meters || 8000).toLocaleString()}m`, up: true, color: PURPLE, badge: ouraData ? "Live" : null },
+                    { label: "Calories", value: todayActivity ? `${(todayActivity.total_calories || 0).toLocaleString()}` : "2,025", unit: "kcal", delta: `Active: ${(todayActivity?.active_calories || 0)} kcal`, up: true, color: AMBER, badge: ouraData ? "Live" : null },
+                  ];
+                  return liveStats;
+                })().map(m => (
                   <div key={m.label} style={{ ...card, padding: "14px 16px" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                       <span style={{ fontSize: 10, color: "var(--color-text-tertiary)" }}>{m.label.toUpperCase()}</span>
@@ -529,7 +578,7 @@ Respond ONLY in valid JSON:
                     <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginBottom: 6 }}>{m.unit}</div>
                     <div style={{ fontSize: 11, color: m.up ? TEAL : RED }}>{m.up ? "↑ " : "↓ "}{m.delta}</div>
                   </div>
-                ))}
+                ))})
               </div>
             </div>
 
