@@ -5,33 +5,21 @@ import { useState, useRef, useEffect } from "react";
 async function fetchOuraData(token) {
   const today = new Date().toISOString().split("T")[0];
   const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().split("T")[0];
-  
-  // Use corsproxy.io to bypass browser CORS restrictions
-  const proxy = "https://api.allorigins.win/raw?url=";
-  const base = "https://api.ouraring.com/v2/usercollection";
-  const headers = { Authorization: `Bearer ${token}` };
 
-  const urls = {
-    sleep: `${base}/daily_sleep?start_date=${weekAgo}&end_date=${today}`,
-    readiness: `${base}/daily_readiness?start_date=${weekAgo}&end_date=${today}`,
-    activity: `${base}/daily_activity?start_date=${weekAgo}&end_date=${today}`,
-    workouts: `${base}/workout?start_date=${weekAgo}&end_date=${today}`,
-  };
-
+  const endpoints = ["daily_sleep", "daily_readiness", "daily_activity", "workout"];
+  const keys = ["sleep", "readiness", "activity", "workouts"];
   const results = {};
-  for (const [key, url] of Object.entries(urls)) {
+
+  for (let i = 0; i < endpoints.length; i++) {
     try {
-      const res = await fetch(proxy + encodeURIComponent(url), { headers });
-      if (!res.ok) {
-        results[key] = { error: `HTTP ${res.status}`, data: [] };
-      } else {
-        results[key] = await res.json();
-      }
+      const res = await fetch(
+        `/.netlify/functions/oura?endpoint=${endpoints[i]}&start_date=${weekAgo}&end_date=${today}`
+      );
+      results[keys[i]] = await res.json();
     } catch (e) {
-      results[key] = { error: e.message, data: [] };
+      results[keys[i]] = { error: e.message, data: [] };
     }
   }
-
   return results;
 }
 
