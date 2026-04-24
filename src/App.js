@@ -67,30 +67,6 @@ function buildChartData(ouraData) {
     cal: activityMap[day]?.cal || 0,
   }));
 };
-  const readinessMap = {};
-  const activityMap = {};
-
-  (ouraData.sleep?.data || []).forEach(d => {
-    const day = days[new Date(d.day).getDay()];
-    sleepMap[day] = Math.round((d.contributors?.total_sleep || 0) * 9 / 100 * 10) / 10;
-  });
-  (ouraData.readiness?.data || []).forEach(d => {
-    const day = days[new Date(d.day).getDay()];
-    readinessMap[day] = d.contributors?.hrv_balance || 0;
-  });
-  (ouraData.activity?.data || []).forEach(d => {
-    const day = days[new Date(d.day).getDay()];
-    activityMap[day] = { steps: d.steps || 0, cal: d.active_calories || 0 };
-  });
-
-  return ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(day => ({
-    day,
-    hrv: readinessMap[day] || 0,
-    sleep: sleepMap[day] || 0,
-    steps: activityMap[day]?.steps || 0,
-    cal: activityMap[day]?.cal || 0,
-  }));
-}
 
 function buildWorkoutData(ouraData) {
   const icons = { running: "◇", cycling: "◈", strength_training: "◉", yoga: "◎", walking: "◇", softball: "◈" };
@@ -578,7 +554,7 @@ Respond ONLY in valid JSON:
                     <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginBottom: 6 }}>{m.unit}</div>
                     <div style={{ fontSize: 11, color: m.up ? TEAL : RED }}>{m.up ? "↑ " : "↓ "}{m.delta}</div>
                   </div>
-                ))})
+                ))}
               </div>
             </div>
 
