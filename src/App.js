@@ -131,11 +131,11 @@ function WeightChart({ data, goalKg, color }) {
 }
 
 // ─── PASTE YOUR ANTHROPIC API KEY BETWEEN THE QUOTES BELOW ───
-const ANTHROPIC_API_KEY = "";
+const ANTHROPIC_API_KEY = process.env.REACT_APP_ANTHROPIC_KEY || "";
 // ─────────────────────────────────────────────────────────────
 
 // ─── PASTE YOUR OURA PERSONAL ACCESS TOKEN BELOW ────────────
-const OURA_PERSONAL_TOKEN = "7W7Z5EETCGTHUCI7P4DQTQFXFGGOSRBY";
+const OURA_PERSONAL_TOKEN = process.env.REACT_APP_OURA_TOKEN || "";
 // ─────────────────────────────────────────────────────────────
 
 
