@@ -241,7 +241,7 @@ export default function IdgieApp() {
     setOuraLoading(true);
     setOuraError("");
     try {
-      const data = await fetchOuraData(OURA_PERSONAL_TOKEN);
+      const data = await fetchOuraData();
       setOuraData(data);
       setChartData(buildChartData(data));
       const wk = buildWorkoutData(data);
