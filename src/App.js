@@ -2,14 +2,14 @@ import { useState, useRef, useEffect } from "react";
 
 
 // ── Oura API helpers ────────────────────────────────────────
-async function fetchOuraData(token) {
+async function fetchOuraData (){
   const today = new Date().toISOString().split("T")[0];
   const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().split("T")[0];
   
   // Use corsproxy.io to bypass browser CORS restrictions
   const proxy = "https://api.allorigins.win/raw?url=";
   const base = "https://api.ouraring.com/v2/usercollection";
-  const headers = { Authorization: `Bearer ${token}` };
+ 
 
   const urls = {
     sleep: `${base}/daily_sleep?start_date=${weekAgo}&end_date=${today}`,
