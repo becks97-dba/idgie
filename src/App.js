@@ -296,17 +296,8 @@ export default function IdgieApp() {
 
   // BCBSAL helpers
   const connectBCBSAL = () => {
-    const params = new URLSearchParams({
-      response_type: "code",
-      client_id: "idgie-app",
-      redirect_uri: window.location.origin,
-      scope: "patient/*.read launch/patient openid fhirUser",
-      state: Math.random().toString(36).slice(2),
-      aud: "https://api.bcbsal.com/fhir/r4",
-    });
-    window.location.href = `https://sso.bcbsal.com/oauth2/authorize?${params}`;
-  };
-
+  window.open("https://portal.safhir.io", "_blank");
+};
   const loadBCBSALData = async () => {
     const token = localStorage.getItem("idgie_bcbsal_token");
     if (!token) return;
