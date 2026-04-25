@@ -1,3 +1,4 @@
+
 import { useState, useRef, useEffect } from "react";
 
 
@@ -296,10 +297,20 @@ export default function IdgieApp() {
   const [activeMetric, setActiveMetric] = useState("hrv");
 
   // Weight
-  const [weights, setWeights] = useState(initWeights);
+  const [weights, setWeights] = useState(() => {
+    try {
+      const saved = localStorage.getItem("idgie_weights");
+      return saved ? JSON.parse(saved) : initWeights;
+    } catch (e) { return initWeights; }
+  });
   const [newWeightKg, setNewWeightKg] = useState("");
   const [newWeightDate, setNewWeightDate] = useState(new Date().toISOString().split("T")[0]);
-  const [goalKg, setGoalKg] = useState(78);
+  const [goalKg, setGoalKg] = useState(() => {
+    try {
+      const saved = localStorage.getItem("idgie_goal_kg");
+      return saved ? parseFloat(saved) : 78;
+    } catch (e) { return 78; }
+  });
   const [editingGoal, setEditingGoal] = useState(false);
   const [goalInput, setGoalInput] = useState("78");
 
@@ -447,8 +458,16 @@ Respond ONLY in valid JSON:
     const kg = parseFloat(newWeightKg);
     if (!kg || kg < 30 || kg > 300) return;
     const label = new Date(newWeightDate + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
-    setWeights(prev => [...prev, { date: label, kg }]);
+    const updated = [...weights, { date: label, kg }];
+    setWeights(updated);
+    try { localStorage.setItem("idgie_weights", JSON.stringify(updated)); } catch (e) {}
     setNewWeightKg("");
+  };
+
+  const deleteWeight = (index) => {
+    const updated = weights.filter((_, i) => i !== index);
+    setWeights(updated);
+    try { localStorage.setItem("idgie_weights", JSON.stringify(updated)); } catch (e) {}
   };
   const latestKg = weights[weights.length - 1]?.kg || 0;
   const startKg = weights[0]?.kg || 0;
@@ -788,7 +807,10 @@ Respond ONLY in valid JSON:
                   <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
                     <span style={{ color: "var(--color-text-tertiary)" }}>Goal:</span>
                     {editingGoal
-                      ? <><input value={goalInput} onChange={e => setGoalInput(e.target.value)} style={{ width: 48, border: "0.5px solid var(--color-border-tertiary)", borderRadius: 4, padding: "2px 6px", fontSize: 11, background: "var(--color-background-secondary)", color: "var(--color-text-primary)" }} /><span style={{ fontSize: 11 }}>kg</span><button onClick={() => { setGoalKg(parseFloat(goalInput) || goalKg); setEditingGoal(false); }} style={{ fontSize: 11, color: TEAL, background: "none", border: "none", cursor: "pointer", fontFamily: "var(--font-sans)" }}>Save</button></>
+                      ? <><input value={goalInput} onChange={e => setGoalInput(e.target.value)} style={{ width: 48, border: "0.5px solid var(--color-border-tertiary)", borderRadius: 4, padding: "2px 6px", fontSize: 11, background: "var(--color-background-secondary)", color: "var(--color-text-primary)" }} /><span style={{ fontSize: 11 }}>kg</span><button onClick={() => { const newGoal = parseFloat(goalInput) || goalKg;
+                      setGoalKg(newGoal);
+                      try { localStorage.setItem("idgie_goal_kg", newGoal); } catch (e) {}
+                      setEditingGoal(false); }} style={{ fontSize: 11, color: TEAL, background: "none", border: "none", cursor: "pointer", fontFamily: "var(--font-sans)" }}>Save</button></>
                       : <><span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: TEAL }}>{goalKg} kg</span><button onClick={() => setEditingGoal(true)} style={{ fontSize: 11, color: "var(--color-text-tertiary)", background: "none", border: "none", cursor: "pointer", fontFamily: "var(--font-sans)" }}>edit</button></>
                     }
                   </div>
@@ -820,7 +842,10 @@ Respond ONLY in valid JSON:
                     {[...weights].reverse().map((w, i) => (
                       <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderTop: i > 0 ? "0.5px solid var(--color-border-tertiary)" : "none" }}>
                         <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>{w.date}</span>
-                        <span style={{ fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 500, color: TEAL }}>{w.kg} kg</span>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <span style={{ fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 500, color: TEAL }}>{w.kg} kg</span>
+                          <button onClick={() => deleteWeight(weights.length - 1 - i)} style={{ fontSize: 10, color: RED, background: "none", border: "none", cursor: "pointer", fontFamily: "var(--font-sans)" }}>✕</button>
+                        </div>
                       </div>
                     ))}
                   </div>
