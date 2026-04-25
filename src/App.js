@@ -186,12 +186,7 @@ const initWeights = [
   { date: "Apr 12", kg: 86.6 }, { date: "Apr 19", kg: 86.1 },
 ];
 
-const initWorkouts = [
-  { id: 1, date: "Apr 20", type: "Softball practice", icon: "◈", duration: "1h 45m", calories: 520, avgHR: 142, maxHR: 168, ouraReadiness: 82 },
-  { id: 2, date: "Apr 18", type: "Strength training", icon: "◉", duration: "45m", calories: 310, avgHR: 128, maxHR: 151, ouraReadiness: 76 },
-  { id: 3, date: "Apr 16", type: "Outdoor walk", icon: "◇", duration: "32m", calories: 185, avgHR: 98, maxHR: 112, ouraReadiness: 88 },
-  { id: 4, date: "Apr 14", type: "Softball game", icon: "◈", duration: "2h 10m", calories: 680, avgHR: 155, maxHR: 178, ouraReadiness: 79 },
-];
+const initWorkouts = [];
 
 const APP_PASSWORD = "idgie2025"; // change this to whatever you want
 
@@ -323,11 +318,11 @@ export default function IdgieApp() {
   const [goalKg, setGoalKg] = useState(() => {
     try {
       const saved = localStorage.getItem("idgie_goal_kg");
-      return saved ? parseFloat(saved) : 78;
+      return saved ? parseFloat(saved) : 70;
     } catch (e) { return 78; }
   });
   const [editingGoal, setEditingGoal] = useState(false);
-  const [goalInput, setGoalInput] = useState("78");
+  const [goalInput, setGoalInput] = useState("70");
 
   // Workouts
   const [workouts] = useState(initWorkouts);
@@ -736,6 +731,17 @@ Respond ONLY in valid JSON:
             <div style={{ background: TEAL_L, border: `0.5px solid ${TEAL}50`, borderRadius: "var(--border-radius-md)", padding: "10px 14px", marginBottom: 20 }}>
               <span style={{ fontSize: 12, color: TEAL_D }}>◈ Conflict resolution active — when Apple Watch and Oura Ring disagree on steps or calories, the higher number wins automatically</span>
             </div>
+            {liveWorkouts.length === 0 && (
+              <div style={{ ...card, padding: 48, textAlign: "center" }}>
+                <div style={{ fontSize: 22, color: "var(--color-text-tertiary)", marginBottom: 12 }}>◈</div>
+                <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 6 }}>No workouts yet</div>
+                <div style={{ fontSize: 12, color: "var(--color-text-secondary)", lineHeight: 1.6 }}>
+                  Workout sync via Apple Watch coming soon.<br />
+                  Your Oura Ring readiness score will appear here<br />
+                  alongside each session when connected.
+                </div>
+              </div>
+            )}
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               {liveWorkouts.map(w => {
                 const wi = workoutInsights[w.id];
@@ -830,7 +836,7 @@ Respond ONLY in valid JSON:
                     }
                   </div>
                 </div>
-                <WeightChart data={weights} goalKg={goalKg} color={TEAL} />
+                <WeightChart data={[...weights].sort((a, b) => new Date(a.date) - new Date(b.date))} goalKg={goalKg} color={TEAL} />
               </div>
 
               <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
