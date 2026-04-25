@@ -110,28 +110,43 @@ function SimpleLineChart({ data, dataKey, color }) {
 }
 
 function WeightChart({ data, goalKg, color }) {
-  const w = 480, h = 230, pad = { top: 10, right: 40, bottom: 24, left: 40 };
+  const w = 480, h = 230, pad = { top: 10, right: 60, bottom: 24, left: 40 };
   const vals = data.map(d => d.kg);
   const allVals = [...vals, goalKg];
-  const min = Math.min(...allVals) - 1, max = Math.max(...allVals) + 1;
+  // min = goal or lowest weight (bottom of chart), max = highest weight (top)
+  const min = Math.min(...allVals) - 2;
+  const max = Math.max(...allVals) + 2;
   const range = max - min || 1;
   const iw = w - pad.left - pad.right;
   const ih = h - pad.top - pad.bottom;
   const x = i => pad.left + (i / Math.max(data.length - 1, 1)) * iw;
+  // Higher kg = higher on chart (heavier = top, lighter = bottom, goal = bottom target)
   const y = v => pad.top + ih - ((v - min) / range) * ih;
   const points = data.map((d, i) => `${x(i)},${y(d.kg)}`).join(" ");
-  const area = data.length > 1 ? `M${x(0)},${y(data[0].kg)} ` + data.map((d,i) => `L${x(i)},${y(d.kg)}`).join(" ") + ` L${x(data.length-1)},${pad.top+ih} L${x(0)},${pad.top+ih} Z` : "";
+  const area = data.length > 1
+    ? `M${x(0)},${y(data[0].kg)} ` + data.map((d,i) => `L${x(i)},${y(d.kg)}`).join(" ") + ` L${x(data.length-1)},${pad.top+ih} L${x(0)},${pad.top+ih} Z`
+    : "";
   const goalY = y(goalKg);
+  const latestY = data.length > 0 ? y(data[data.length-1].kg) : 0;
+  const trending = data.length > 1 && data[data.length-1].kg < data[0].kg;
   return (
     <svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ overflow: "visible" }}>
       {[0,1,2,3].map(i => <line key={i} x1={pad.left} x2={w-pad.right} y1={pad.top+(ih/3)*i} y2={pad.top+(ih/3)*i} stroke="rgba(128,128,128,0.15)" strokeDasharray="4 4" />)}
+      {/* Goal line */}
       <line x1={pad.left} x2={w-pad.right} y1={goalY} y2={goalY} stroke={color} strokeDasharray="6 4" strokeWidth={1.5} />
-      <text x={w-pad.right+4} y={goalY+4} fontSize={10} fill={color}>Goal {goalKg}kg</text>
-      {area && <path d={area} fill={color} fillOpacity={0.15} />}
-      {data.length > 1 && <polyline points={points} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" />}
-      {data.map((d, i) => <circle key={i} cx={x(i)} cy={y(d.kg)} r={3} fill={color} />)}
+      <text x={w-pad.right+4} y={goalY+4} fontSize={10} fill={color} fontWeight="500">Goal</text>
+      <text x={w-pad.right+4} y={goalY+14} fontSize={10} fill={color}>{goalKg}kg</text>
+      {/* Area and line */}
+      {area && <path d={area} fill={color} fillOpacity={0.12} />}
+      {data.length > 1 && <polyline points={points} fill="none" stroke={trending ? color : "#E24B4A"} strokeWidth={2} strokeLinejoin="round" />}
+      {/* Data points */}
+      {data.map((d, i) => <circle key={i} cx={x(i)} cy={y(d.kg)} r={3} fill={trending ? color : "#E24B4A"} />)}
+      {/* X axis labels - show every other one */}
       {data.map((d, i) => i % 2 === 0 ? <text key={i} x={x(i)} y={h-4} textAnchor="middle" fontSize={9} fill="#888">{d.date}</text> : null)}
-      {[Math.ceil(min), Math.round((min+max)/2), Math.floor(max)].map((v,i) => <text key={i} x={pad.left-6} y={y(v)+4} textAnchor="end" fontSize={10} fill="#888">{v}</text>)}
+      {/* Y axis labels */}
+      {[min+2, Math.round((min+max)/2), max-2].map((v,i) => <text key={i} x={pad.left-6} y={y(v)+4} textAnchor="end" fontSize={10} fill="#888">{Math.round(v)}</text>)}
+      {/* Trending indicator */}
+      <text x={w-pad.right+4} y={latestY+4} fontSize={10} fill={trending ? color : "#E24B4A"}>{trending ? "↓" : "↑"}</text>
     </svg>
   );
 }
