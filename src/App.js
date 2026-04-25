@@ -239,6 +239,10 @@ export default function IdgieApp() {
   const [ouraLoading, setOuraLoading] = useState(false);
   const [ouraError, setOuraError] = useState("");
   const [chartData, setChartData] = useState(weekData);
+  const [bcbsalConnected, setBcbsalConnected] = useState(() => !!localStorage.getItem("idgie_bcbsal_token"));
+  const [bcbsalData, setBcbsalData] = useState(null);
+  const [bcbsalLoading, setBcbsalLoading] = useState(false);
+  const [bcbsalError, setBcbsalError] = useState("");
   const [liveWorkouts, setLiveWorkouts] = useState(initWorkouts);
 
   // Load Oura data on startup if token is set
@@ -281,6 +285,43 @@ export default function IdgieApp() {
   };
 
   const refreshOura = () => loadOuraData(true);
+
+  // BCBSAL FHIR connection
+  const connectBCBSAL = () => {
+    const params = new URLSearchParams({
+      response_type: "code",
+      client_id: "idgie-app",
+      redirect_uri: window.location.origin + "/bcbsal-callback",
+      scope: "patient/*.read launch/patient openid fhirUser",
+      state: Math.random().toString(36).slice(2),
+      aud: "https://api.bcbsal.com/fhir/r4",
+    });
+    window.location.href = `https://sso.bcbsal.com/oauth2/authorize?${params}`;
+  };
+
+  const loadBCBSALData = async () => {
+    const token = localStorage.getItem("idgie_bcbsal_token");
+    if (!token) return;
+    setBcbsalLoading(true);
+    setBcbsalError("");
+    try {
+      const res = await fetch("/.netlify/functions/bcbsal?resource=all", {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setBcbsalData(data);
+    } catch (e) {
+      setBcbsalError("Could not load BCBSAL data — try reconnecting");
+    }
+    setBcbsalLoading(false);
+  };
+
+  const disconnectBCBSAL = () => {
+    localStorage.removeItem("idgie_bcbsal_token");
+    setBcbsalConnected(false);
+    setBcbsalData(null);
+  };
 
   // Food log
   const [meals, setMeals] = useState([
@@ -1004,11 +1045,109 @@ Respond ONLY in valid JSON:
         {/* ─── HEALTH RECORDS ─── */}
         {nav === "records" && (
           <div>
-            <h2 style={{ margin: "0 0 2px", fontSize: 20 }}>Connect health records</h2>
-            <p style={{ color: "var(--color-text-secondary)", margin: "0 0 20px", fontSize: 13 }}>Use federal interoperability rules to pull your data from insurers and providers</p>
-            <div style={{ background: TEAL_L, border: `0.5px solid ${TEAL}60`, borderRadius: "var(--border-radius-lg)", padding: 16, marginBottom: 24 }}>
+            <h2 style={{ margin: "0 0 2px", fontSize: 20 }}>Health records</h2>
+            <p style={{ color: "var(--color-text-secondary)", margin: "0 0 20px", fontSize: 13 }}>Connect your insurance and provider records using federal interoperability rules</p>
+
+            {/* Legal rights banner */}
+            <div style={{ background: TEAL_L, border: `0.5px solid ${TEAL}60`, borderRadius: "var(--border-radius-lg)", padding: 16, marginBottom: 20 }}>
               <div style={{ fontSize: 13, fontWeight: 500, color: TEAL_D, marginBottom: 5 }}>Your legal right to your health data</div>
               <div style={{ fontSize: 12, color: TEAL_D, lineHeight: 1.65 }}>Under the <strong>21st Century Cures Act</strong> and CMS Interoperability Rule (2021), health insurers and most providers <strong>must</strong> provide free access to your data via SMART on FHIR APIs — including claims, EOBs, clinical notes, labs, and medications.</div>
+            </div>
+
+            {/* BCBSAL Connection Card */}
+            <div style={{ ...card, marginBottom: 16, border: `0.5px solid ${bcbsalConnected ? TEAL + "60" : "var(--color-border-tertiary)"}` }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>BCBSAL — Blue Cross Blue Shield Alabama</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: bcbsalConnected ? TEAL : "#888", display: "inline-block" }} />
+                    <span style={{ fontSize: 11, color: bcbsalConnected ? TEAL : "var(--color-text-tertiary)" }}>
+                      {bcbsalConnected ? "Connected via SMART on FHIR" : "Not connected"}
+                    </span>
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  {bcbsalConnected && (
+                    <button onClick={disconnectBCBSAL} style={{ padding: "5px 12px", border: "0.5px solid var(--color-border-tertiary)", borderRadius: 20, background: "transparent", color: "var(--color-text-tertiary)", fontSize: 11, cursor: "pointer", fontFamily: "var(--font-sans)" }}>
+                      Disconnect
+                    </button>
+                  )}
+                  <button onClick={bcbsalConnected ? loadBCBSALData : connectBCBSAL}
+                    style={{ padding: "5px 14px", border: `0.5px solid ${BLUE}`, borderRadius: 20, background: `${BLUE}18`, color: BLUE, fontSize: 11, cursor: "pointer", fontFamily: "var(--font-sans)" }}>
+                    {bcbsalConnected ? (bcbsalLoading ? "Loading..." : "Refresh data") : "Connect BCBSAL →"}
+                  </button>
+                </div>
+              </div>
+
+              {!bcbsalConnected && (
+                <div>
+                  <p style={{ fontSize: 12, color: "var(--color-text-secondary)", margin: "0 0 14px", lineHeight: 1.6 }}>
+                    Connect via SMART on FHIR to automatically pull your claims, EOBs, coverage details, and care gaps into IDGIE.
+                  </p>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {[
+                      { n: "1", title: "Click Connect BCBSAL above", detail: "You'll be redirected to the BCBSAL login page" },
+                      { n: "2", title: "Sign in with your BCBSAL member credentials", detail: "Use the same login as bcbsal.com" },
+                      { n: "3", title: "Approve IDGIE's data access request", detail: "Select the data you want to share — claims, coverage, and care gaps" },
+                      { n: "4", title: "You'll be redirected back to IDGIE", detail: "Your claims and coverage data will load automatically" },
+                    ].map((s, i) => (
+                      <div key={s.n} style={{ display: "flex", gap: 12, alignItems: "flex-start", padding: "8px 0", borderTop: i > 0 ? "0.5px solid var(--color-border-tertiary)" : "none" }}>
+                        <div style={{ width: 22, height: 22, borderRadius: "50%", background: `${BLUE}18`, border: `0.5px solid ${BLUE}60`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontFamily: "var(--font-mono)", fontSize: 10, fontWeight: 500, color: BLUE }}>{s.n}</div>
+                        <div><div style={{ fontSize: 12, fontWeight: 500, marginBottom: 2 }}>{s.title}</div><div style={{ fontSize: 11, color: "var(--color-text-secondary)", lineHeight: 1.5 }}>{s.detail}</div></div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {bcbsalConnected && bcbsalData && (
+                <div style={{ borderTop: "0.5px solid var(--color-border-tertiary)", paddingTop: 14 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 14 }}>
+                    {[
+                      { label: "Plan", value: bcbsalData.coverage?.plan || "—" },
+                      { label: "Member ID", value: bcbsalData.coverage?.memberId || "—" },
+                      { label: "Status", value: bcbsalData.coverage?.status || "—" },
+                    ].map(s => (
+                      <div key={s.label} style={{ background: "var(--color-background-secondary)", borderRadius: "var(--border-radius-md)", padding: "10px 12px" }}>
+                        <div style={{ fontSize: 9, color: "var(--color-text-tertiary)", marginBottom: 4 }}>{s.label.toUpperCase()}</div>
+                        <div style={{ fontSize: 12, fontWeight: 500 }}>{s.value}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {bcbsalData.claims?.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: 10, color: "var(--color-text-tertiary)", fontWeight: 500, marginBottom: 10 }}>RECENT CLAIMS</div>
+                      {bcbsalData.claims.slice(0, 5).map((claim, i) => (
+                        <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderTop: i > 0 ? "0.5px solid var(--color-border-tertiary)" : "none" }}>
+                          <div>
+                            <div style={{ fontSize: 12, fontWeight: 500 }}>{claim.provider || "Provider"}</div>
+                            <div style={{ fontSize: 11, color: "var(--color-text-secondary)" }}>{claim.date} · {claim.type}</div>
+                          </div>
+                          <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 12 }}>
+                            <div style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: TEAL }}>${claim.amount || "—"}</div>
+                            <div style={{ fontSize: 10, color: "var(--color-text-tertiary)" }}>{claim.status}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {bcbsalData.careGaps?.length > 0 && (
+                    <div style={{ marginTop: 14 }}>
+                      <div style={{ fontSize: 10, color: "var(--color-text-tertiary)", fontWeight: 500, marginBottom: 10 }}>CARE GAPS</div>
+                      {bcbsalData.careGaps.map((gap, i) => (
+                        <div key={i} style={{ display: "flex", gap: 10, padding: "8px 0", borderTop: i > 0 ? "0.5px solid var(--color-border-tertiary)" : "none", alignItems: "center" }}>
+                          <span style={{ width: 6, height: 6, borderRadius: "50%", background: RED, flexShrink: 0 }} />
+                          <span style={{ fontSize: 12 }}>{gap}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {bcbsalError && (
+                <div style={{ fontSize: 12, color: RED, marginTop: 10 }}>{bcbsalError}</div>
+              )}
             </div>
             {[
               { title: "Connect BCBSAL (Blue Cross Blue Shield Alabama)", accent: BLUE, steps: [
