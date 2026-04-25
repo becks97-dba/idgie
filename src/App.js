@@ -2,24 +2,36 @@ import { useState, useRef, useEffect } from "react";
 
 
 // ── Oura API helpers ────────────────────────────────────────
-async function fetchOuraData() {
+async function fetchOuraData(token) {
   const today = new Date().toISOString().split("T")[0];
   const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().split("T")[0];
+  
+  // Use corsproxy.io to bypass browser CORS restrictions
+  const proxy = "https://api.allorigins.win/raw?url=";
+  const base = "https://api.ouraring.com/v2/usercollection";
+  const headers = { Authorization: `Bearer ${token}` };
 
-  const endpoints = ["daily_sleep", "daily_readiness", "daily_activity", "workout"];
-  const keys = ["sleep", "readiness", "activity", "workouts"];
+  const urls = {
+    sleep: `${base}/daily_sleep?start_date=${weekAgo}&end_date=${today}`,
+    readiness: `${base}/daily_readiness?start_date=${weekAgo}&end_date=${today}`,
+    activity: `${base}/daily_activity?start_date=${weekAgo}&end_date=${today}`,
+    workouts: `${base}/workout?start_date=${weekAgo}&end_date=${today}`,
+  };
+
   const results = {};
-
-  for (let i = 0; i < endpoints.length; i++) {
+  for (const [key, url] of Object.entries(urls)) {
     try {
-      const res = await fetch(
-        `/.netlify/functions/oura?endpoint=${endpoints[i]}&start_date=${weekAgo}&end_date=${today}`
-      );
-      results[keys[i]] = await res.json();
+      const res = await fetch(proxy + encodeURIComponent(url), { headers });
+      if (!res.ok) {
+        results[key] = { error: `HTTP ${res.status}`, data: [] };
+      } else {
+        results[key] = await res.json();
+      }
     } catch (e) {
-      results[keys[i]] = { error: e.message, data: [] };
+      results[key] = { error: e.message, data: [] };
     }
   }
+
   return results;
 }
 
@@ -225,11 +237,28 @@ export default function IdgieApp() {
     }
   }, []); // eslint-disable-line
 
-  const loadOuraData = async () => {
+  const loadOuraData = async (force = false) => {
+    const cacheKey = "idgie_oura_cache";
+    const cacheExpiry = 24 * 60 * 60 * 1000; // 24 hours
+
+    if (!force) {
+      try {
+        const cached = JSON.parse(localStorage.getItem(cacheKey));
+        if (cached && Date.now() - cached.timestamp < cacheExpiry) {
+          setOuraData(cached.data);
+          setChartData(buildChartData(cached.data));
+          const wk = buildWorkoutData(cached.data);
+          if (wk.length > 0) setLiveWorkouts(wk);
+          return;
+        }
+      } catch (e) {}
+    }
+
     setOuraLoading(true);
     setOuraError("");
     try {
       const data = await fetchOuraData();
+      localStorage.setItem(cacheKey, JSON.stringify({ timestamp: Date.now(), data }));
       setOuraData(data);
       setChartData(buildChartData(data));
       const wk = buildWorkoutData(data);
@@ -240,7 +269,7 @@ export default function IdgieApp() {
     setOuraLoading(false);
   };
 
-  const refreshOura = () => loadOuraData();
+  const refreshOura = () => loadOuraData(true);
 
   // Food log
   const [meals, setMeals] = useState([
@@ -435,7 +464,6 @@ Respond ONLY in valid JSON:
     { id: "insights", label: "AI insights", sym: "✦" },
     { id: "sources", label: "Data sources", sym: "◇" },
     { id: "records", label: "Health records", sym: "≡" },
-    { id: "debug", label: "Debug", sym: "⚙" },
   ];
 
   if (!unlocked) return <PasswordGate onUnlock={() => setUnlocked(true)} />;
@@ -976,35 +1004,7 @@ Respond ONLY in valid JSON:
           </div>
         )}
 
-        {/* ─── DEBUG ─── */}
-        {nav === "debug" && (
-          <div>
-            <h2 style={{ margin: "0 0 2px", fontSize: 20 }}>Oura Debug Panel</h2>
-            <p style={{ color: "var(--color-text-secondary)", margin: "0 0 20px", fontSize: 13 }}>Shows exactly what Oura is sending back so we can fix the data mapping</p>
-            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              {[
-                { label: "Sleep data", data: ouraData?.sleep },
-                { label: "Readiness data", data: ouraData?.readiness },
-                { label: "Activity data", data: ouraData?.activity },
-                { label: "Workout data", data: ouraData?.workouts },
-              ].map(section => (
-                <div key={section.label} style={{ ...card }}>
-                  <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 10, color: TEAL }}>{section.label}</div>
-                  {section.data ? (
-                    <pre style={{ fontSize: 10, color: "var(--color-text-secondary)", overflow: "auto", maxHeight: 200, margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
-                      {JSON.stringify(section.data?.error ? { ERROR: section.data.error } : (section.data?.data?.[0] || section.data), null, 2)}
-                    </pre>
-                  ) : (
-                    <div style={{ fontSize: 12, color: "var(--color-text-tertiary)" }}>No data yet — make sure your token is set and refresh</div>
-                  )}
-                </div>
-              ))}
-              <button onClick={refreshOura} style={{ padding: "10px", background: TEAL, border: "none", borderRadius: "var(--border-radius-md)", color: "#fff", fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "var(--font-sans)", width: 200 }}>
-                Refresh Oura data
-              </button>
-            </div>
-          </div>
-        )}
+
       </main>
     </div>
   );
