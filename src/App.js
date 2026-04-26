@@ -330,7 +330,7 @@ export default function IdgieApp() {
     setBcbsalData(null);
   };
 
-  // Lab results PDF
+  // Lab results PDF — tries document mode first, falls back to image mode for scanned PDFs
   const handleLabUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -340,7 +340,13 @@ export default function IdgieApp() {
       setAnalyzingLabs(true);
       setLabSummary(null);
       setLabError("");
-      try {
+
+      const prompt = `Analyze these lab results for someone with: ${profile.conditions} | Goals: ${profile.goals} | Meds: ${profile.medications}
+Extract ALL lab values shown and flag anything outside normal range.
+Respond ONLY in valid JSON (no markdown fences):
+{"labDate":"string","provider":"string","results":[{"name":"string","value":"string","unit":"string","normalRange":"string","status":"normal|high|low|critical"}],"flagged":["string describing concerning values"],"relevantToGoals":"string","recommendations":["string"]}`;
+
+      const callAPI = async (contentBlocks) => {
         const res = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
           headers: {
@@ -351,23 +357,48 @@ export default function IdgieApp() {
           },
           body: JSON.stringify({
             model: "claude-sonnet-4-20250514",
-            max_tokens: 1000,
-            messages: [{
-              role: "user",
-              content: [
-                { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } },
-                { type: "text", text: `Analyze these lab results for someone with: ${profile.conditions} | Goals: ${profile.goals} | Meds: ${profile.medications}
-Extract all lab values and flag anything outside normal range. Respond ONLY in valid JSON (no markdown):
-{"labDate":"string","provider":"string","results":[{"name":"string","value":"string","unit":"string","normalRange":"string","status":"normal|high|low|critical"}],"flagged":["string describing concerning values"],"relevantToGoals":"string","recommendations":["string"]}` }
-              ]
-            }]
+            max_tokens: 1500,
+            messages: [{ role: "user", content: contentBlocks }]
           }),
         });
         const data = await res.json();
         const text = data.content?.find(b => b.type === "text")?.text || "";
-        setLabSummary(JSON.parse(text.replace(/```json|```/g, "").trim()));
-      } catch (e) {
-        setLabError("Could not read PDF — make sure it's a valid lab results document");
+        return JSON.parse(text.replace(/```json|```/g, "").trim());
+      };
+
+      try {
+        // First try as PDF document (works for text-based PDFs)
+        const result = await callAPI([
+          { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } },
+          { type: "text", text: prompt }
+        ]);
+        // Check if we got real data back
+        if (result.results && result.results.length > 0) {
+          setLabSummary(result);
+          setAnalyzingLabs(false);
+          return;
+        }
+        throw new Error("No results extracted");
+      } catch (e1) {
+        // Fall back to image mode for scanned/image-based PDFs
+        try {
+          const result = await callAPI([
+            { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64 } },
+            { type: "text", text: prompt }
+          ]);
+          setLabSummary(result);
+        } catch (e2) {
+          // Final fallback — try as document with explicit OCR instruction
+          try {
+            const result = await callAPI([
+              { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } },
+              { type: "text", text: "This is a scanned lab results document. Please use OCR to read all text and extract the lab values. " + prompt }
+            ]);
+            setLabSummary(result);
+          } catch (e3) {
+            setLabError("Could not read this PDF. Try taking a photo of the lab results and uploading that as an image instead.");
+          }
+        }
       }
       setAnalyzingLabs(false);
     };
@@ -757,11 +788,11 @@ Respond ONLY in valid JSON:
                   style={{ padding: "5px 14px", border: `0.5px solid ${BLUE}`, borderRadius: 20, background: `${BLUE}18`, color: BLUE, fontSize: 11, cursor: "pointer", fontFamily: "var(--font-sans)" }}>
                   {labSummary ? "Upload new results →" : "Upload lab PDF →"}
                 </button>
-                <input ref={labRef} type="file" accept="application/pdf" style={{ display: "none" }} onChange={handleLabUpload} />
+                <input ref={labRef} type="file" accept="application/pdf,image/*" style={{ display: "none" }} onChange={handleLabUpload} />
               </div>
 
               <p style={{ fontSize: 12, color: "var(--color-text-secondary)", margin: "0 0 12px", lineHeight: 1.6 }}>
-                Upload any lab results PDF — from PlushCare, your doctor, or any lab. IDGIE reads every value, flags anything outside normal range, and connects the results to your specific health conditions and goals.
+                Upload a lab results PDF or photo. IDGIE reads every value, flags anything outside normal range, and connects the results to your specific health conditions and goals. If your PDF is scanned, try uploading a clear photo instead.
               </p>
 
               {analyzingLabs && (
