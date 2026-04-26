@@ -1,4 +1,3 @@
-
 import { useState, useRef, useEffect } from "react";
 
 // ─── KEYS (stored in Netlify environment variables) ──────────
@@ -215,11 +214,11 @@ export default function IdgieApp() {
   const [bcbsalLoading, setBcbsalLoading] = useState(false);
   const [bcbsalError, setBcbsalError] = useState("");
 
-  // PlushCare state
-  const [analyzingPdf, setAnalyzingPdf] = useState(false);
-  const [pdfSummary, setPdfSummary] = useState(null);
-  const [pdfError, setPdfError] = useState("");
-  const pdfRef = useRef();
+  // Lab results state
+  const [analyzingLabs, setAnalyzingLabs] = useState(false);
+  const [labSummary, setLabSummary] = useState(null);
+  const [labError, setLabError] = useState("");
+  const labRef = useRef();
 
   // Profile
   const [profile] = useState({
@@ -296,8 +295,17 @@ export default function IdgieApp() {
 
   // BCBSAL helpers
   const connectBCBSAL = () => {
-  window.open("https://portal.safhir.io", "_blank");
-};
+    const params = new URLSearchParams({
+      response_type: "code",
+      client_id: "idgie-app",
+      redirect_uri: window.location.origin,
+      scope: "patient/*.read launch/patient openid fhirUser",
+      state: Math.random().toString(36).slice(2),
+      aud: "https://api.bcbsal.com/fhir/r4",
+    });
+    window.location.href = `https://sso.bcbsal.com/oauth2/authorize?${params}`;
+  };
+
   const loadBCBSALData = async () => {
     const token = localStorage.getItem("idgie_bcbsal_token");
     if (!token) return;
@@ -322,16 +330,16 @@ export default function IdgieApp() {
     setBcbsalData(null);
   };
 
-  // PlushCare PDF
-  const handlePdfUpload = async (e) => {
+  // Lab results PDF
+  const handleLabUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = async (ev) => {
       const base64 = ev.target.result.split(",")[1];
-      setAnalyzingPdf(true);
-      setPdfSummary(null);
-      setPdfError("");
+      setAnalyzingLabs(true);
+      setLabSummary(null);
+      setLabError("");
       try {
         const res = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
@@ -348,20 +356,20 @@ export default function IdgieApp() {
               role: "user",
               content: [
                 { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } },
-                { type: "text", text: `Summarize this PlushCare visit note for someone with: ${profile.conditions} | Goals: ${profile.goals}
-Respond ONLY in valid JSON (no markdown):
-{"visitDate":"string","provider":"string","diagnoses":["string"],"medications":["string"],"keyFindings":["string"],"followUpItems":["string"],"relevantToGoals":"string"}` }
+                { type: "text", text: `Analyze these lab results for someone with: ${profile.conditions} | Goals: ${profile.goals} | Meds: ${profile.medications}
+Extract all lab values and flag anything outside normal range. Respond ONLY in valid JSON (no markdown):
+{"labDate":"string","provider":"string","results":[{"name":"string","value":"string","unit":"string","normalRange":"string","status":"normal|high|low|critical"}],"flagged":["string describing concerning values"],"relevantToGoals":"string","recommendations":["string"]}` }
               ]
             }]
           }),
         });
         const data = await res.json();
         const text = data.content?.find(b => b.type === "text")?.text || "";
-        setPdfSummary(JSON.parse(text.replace(/```json|```/g, "").trim()));
+        setLabSummary(JSON.parse(text.replace(/```json|```/g, "").trim()));
       } catch (e) {
-        setPdfError("Could not read PDF — make sure it's a valid PlushCare visit note");
+        setLabError("Could not read PDF — make sure it's a valid lab results document");
       }
-      setAnalyzingPdf(false);
+      setAnalyzingLabs(false);
     };
     reader.readAsDataURL(file);
   };
@@ -443,7 +451,7 @@ Respond ONLY in valid JSON:
           {[
             { label: "Oura Ring", on: !!ouraData },
             { label: "BCBSAL", on: bcbsalConnected },
-            { label: "PlushCare", on: !!pdfSummary },
+            { label: "Lab Results", on: !!labSummary },
           ].map(s => (
             <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 7, padding: "3px 10px", fontSize: 12 }}>
               <span style={{ width: 5, height: 5, borderRadius: "50%", background: s.on ? TEAL : "#888780", flexShrink: 0 }} />
@@ -733,58 +741,83 @@ Respond ONLY in valid JSON:
               {bcbsalError && <div style={{ fontSize: 12, color: RED, marginTop: 10 }}>{bcbsalError}</div>}
             </div>
 
-            {/* PlushCare Card */}
+            {/* Lab Results Card */}
             <div style={card}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
                 <div>
-                  <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>PlushCare — Telehealth</div>
+                  <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>Lab Results</div>
                   <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: pdfSummary ? TEAL : BLUE, display: "inline-block" }} />
-                    <span style={{ fontSize: 11, color: pdfSummary ? TEAL : BLUE }}>
-                      {pdfSummary ? "Visit note loaded" : "Manual sync via PDF upload"}
+                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: labSummary ? TEAL : BLUE, display: "inline-block" }} />
+                    <span style={{ fontSize: 11, color: labSummary ? TEAL : BLUE }}>
+                      {labSummary ? `Labs from ${labSummary.labDate} loaded` : "Upload a lab results PDF"}
                     </span>
                   </div>
                 </div>
-                <button onClick={() => pdfRef.current?.click()}
+                <button onClick={() => labRef.current?.click()}
                   style={{ padding: "5px 14px", border: `0.5px solid ${BLUE}`, borderRadius: 20, background: `${BLUE}18`, color: BLUE, fontSize: 11, cursor: "pointer", fontFamily: "var(--font-sans)" }}>
-                  {pdfSummary ? "Upload new note" : "Upload visit note →"}
+                  {labSummary ? "Upload new results →" : "Upload lab PDF →"}
                 </button>
-                <input ref={pdfRef} type="file" accept="application/pdf" style={{ display: "none" }} onChange={handlePdfUpload} />
+                <input ref={labRef} type="file" accept="application/pdf" style={{ display: "none" }} onChange={handleLabUpload} />
               </div>
 
               <p style={{ fontSize: 12, color: "var(--color-text-secondary)", margin: "0 0 12px", lineHeight: 1.6 }}>
-                PlushCare uses a proprietary EHR without a public FHIR endpoint. Download your visit summary PDF from the PlushCare portal, upload it here, and IDGIE will read and summarize it in the context of your health goals.
+                Upload any lab results PDF — from PlushCare, your doctor, or any lab. IDGIE reads every value, flags anything outside normal range, and connects the results to your specific health conditions and goals.
               </p>
 
-              {analyzingPdf && (
-                <div style={{ textAlign: "center", padding: "20px 0", color: BLUE, fontSize: 13 }}>◌ Reading your visit note...</div>
+              {analyzingLabs && (
+                <div style={{ textAlign: "center", padding: "20px 0", color: BLUE, fontSize: 13 }}>◌ Reading your lab results...</div>
               )}
 
-              {pdfError && (
-                <div style={{ fontSize: 12, color: RED, padding: "10px 0" }}>{pdfError}</div>
+              {labError && (
+                <div style={{ fontSize: 12, color: RED, padding: "10px 0" }}>{labError}</div>
               )}
 
-              {pdfSummary && !pdfSummary.error && (
+              {labSummary && !labSummary.error && (
                 <div style={{ background: "var(--color-background-secondary)", borderRadius: "var(--border-radius-md)", padding: 16 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
-                    <div style={{ fontSize: 13, fontWeight: 500 }}>Visit — {pdfSummary.visitDate}</div>
-                    <div style={{ fontSize: 11, color: "var(--color-text-secondary)" }}>{pdfSummary.provider}</div>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 14 }}>
+                    <div style={{ fontSize: 13, fontWeight: 500 }}>Labs — {labSummary.labDate}</div>
+                    <div style={{ fontSize: 11, color: "var(--color-text-secondary)" }}>{labSummary.provider}</div>
                   </div>
-                  {[
-                    { label: "Key findings", items: pdfSummary.keyFindings, color: TEAL },
-                    { label: "Diagnoses", items: pdfSummary.diagnoses, color: BLUE },
-                    { label: "Medications", items: pdfSummary.medications, color: PURPLE },
-                    { label: "Follow-up needed", items: pdfSummary.followUpItems, color: AMBER },
-                  ].map(s => s.items?.length > 0 && (
-                    <div key={s.label} style={{ marginBottom: 10 }}>
-                      <div style={{ fontSize: 9, color: s.color, fontWeight: 500, marginBottom: 4 }}>{s.label.toUpperCase()}</div>
-                      {s.items.map((item, i) => <div key={i} style={{ fontSize: 12, color: "var(--color-text-primary)", marginBottom: 2 }}>· {item}</div>)}
+
+                  {/* Lab values table */}
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 9, color: "var(--color-text-tertiary)", fontWeight: 500, marginBottom: 8 }}>LAB VALUES</div>
+                    {labSummary.results?.map((r, i) => (
+                      <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderTop: i > 0 ? "0.5px solid var(--color-border-tertiary)" : "none" }}>
+                        <span style={{ fontSize: 12, color: "var(--color-text-primary)" }}>{r.name}</span>
+                        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                          <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 500, color: r.status === "normal" ? TEAL : r.status === "critical" ? RED : AMBER }}>
+                            {r.value} {r.unit}
+                          </span>
+                          <span style={{ fontSize: 10, color: "var(--color-text-tertiary)", minWidth: 80 }}>{r.normalRange}</span>
+                          {r.status !== "normal" && (
+                            <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 8, background: r.status === "critical" ? `${RED}20` : `${AMBER}20`, color: r.status === "critical" ? RED : AMBER, fontWeight: 500 }}>
+                              {r.status.toUpperCase()}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {labSummary.flagged?.length > 0 && (
+                    <div style={{ borderLeft: `3px solid ${RED}`, paddingLeft: 10, marginBottom: 12 }}>
+                      <div style={{ fontSize: 9, color: RED, fontWeight: 500, marginBottom: 4 }}>FLAGGED VALUES</div>
+                      {labSummary.flagged.map((f, i) => <div key={i} style={{ fontSize: 12, color: "var(--color-text-primary)", marginBottom: 2 }}>· {f}</div>)}
                     </div>
-                  ))}
-                  {pdfSummary.relevantToGoals && (
-                    <div style={{ borderLeft: `3px solid ${TEAL}`, paddingLeft: 10, marginTop: 10 }}>
+                  )}
+
+                  {labSummary.relevantToGoals && (
+                    <div style={{ borderLeft: `3px solid ${TEAL}`, paddingLeft: 10, marginBottom: 12 }}>
                       <div style={{ fontSize: 9, color: TEAL, fontWeight: 500, marginBottom: 3 }}>RELEVANT TO YOUR GOALS</div>
-                      <div style={{ fontSize: 12, color: "var(--color-text-primary)", lineHeight: 1.5 }}>{pdfSummary.relevantToGoals}</div>
+                      <div style={{ fontSize: 12, color: "var(--color-text-primary)", lineHeight: 1.5 }}>{labSummary.relevantToGoals}</div>
+                    </div>
+                  )}
+
+                  {labSummary.recommendations?.length > 0 && (
+                    <div style={{ borderLeft: `3px solid ${PURPLE}`, paddingLeft: 10 }}>
+                      <div style={{ fontSize: 9, color: PURPLE, fontWeight: 500, marginBottom: 4 }}>RECOMMENDATIONS</div>
+                      {labSummary.recommendations.map((r, i) => <div key={i} style={{ fontSize: 12, color: "var(--color-text-primary)", marginBottom: 2 }}>· {r}</div>)}
                     </div>
                   )}
                 </div>
