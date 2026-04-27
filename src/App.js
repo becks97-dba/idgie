@@ -392,80 +392,69 @@ export default function IdgieApp() {
 
 
 
-  // Lab results PDF — tries document mode first, falls back to image mode for scanned PDFs
-  const handleLabUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async (ev) => {
-      const base64 = ev.target.result.split(",")[1];
-      setAnalyzingLabs(true);
-      setLabSummary(null);
-      setLabError("");
-
-      const prompt = `Analyze these lab results for someone with: ${profile.conditions} | Goals: ${profile.goals} | Meds: ${profile.medications}
-Extract ALL lab values shown and flag anything outside normal range.
-Respond ONLY in valid JSON (no markdown fences):
-{"labDate":"string","provider":"string","results":[{"name":"string","value":"string","unit":"string","normalRange":"string","status":"normal|high|low|critical"}],"flagged":["string describing concerning values"],"relevantToGoals":"string","recommendations":["string"]}`;
-
-      const callAPI = async (contentBlocks) => {
-        const res = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-api-key": ANTHROPIC_API_KEY,
-            "anthropic-version": "2023-06-01",
-            "anthropic-dangerous-direct-browser-access": "true",
-          },
-          body: JSON.stringify({
-            model: "claude-sonnet-4-20250514",
-            max_tokens: 1500,
-            messages: [{ role: "user", content: contentBlocks }]
-          }),
-        });
-        const data = await res.json();
-        const text = data.content?.find(b => b.type === "text")?.text || "";
-        return JSON.parse(text.replace(/```json|```/g, "").trim());
-      };
-
-      try {
-        // First try as PDF document (works for text-based PDFs)
-        const result = await callAPI([
-          { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } },
-          { type: "text", text: prompt }
-        ]);
-        // Check if we got real data back
-        if (result.results && result.results.length > 0) {
-          setLabSummary(result);
-          setAnalyzingLabs(false);
-          return;
-        }
-        throw new Error("No results extracted");
-      } catch (e1) {
-        // Fall back to image mode for scanned/image-based PDFs
-        try {
-          const result = await callAPI([
-            { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64 } },
-            { type: "text", text: prompt }
-          ]);
-          setLabSummary(result);
-        } catch (e2) {
-          // Final fallback — try as document with explicit OCR instruction
-          try {
-            const result = await callAPI([
-              { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } },
-              { type: "text", text: "This is a scanned lab results document. Please use OCR to read all text and extract the lab values. " + prompt }
-            ]);
-            setLabSummary(result);
-          } catch (e3) {
-            setLabError("Could not read this PDF. Try taking a photo of the lab results and uploading that as an image instead.");
-          }
-        }
-      }
-      setAnalyzingLabs(false);
-    };
-    reader.readAsDataURL(file);
+  // BCBSAL helpers
+  const connectBCBSAL = () => {
+    const redirectUri = window.location.origin;
+    const params = new URLSearchParams({
+      response_type: "code",
+      client_id: "9akZZDwCKo0ZlxU2uag4je9zrDKpO8WToHjKBcZx",
+      redirect_uri: redirectUri,
+      scope: "patient/*.read launch/patient openid fhirUser",
+      state: Math.random().toString(36).slice(2),
+      aud: "https://api-bcbsal-uat.safhir.io/v1/api",
+    });
+    window.location.href = "https://api-bcbsal-uat.safhir.io/slapv3/o/pdex/authorize/?" + params.toString();
   };
+
+  const loadBCBSALData = async () => {
+    const token = localStorage.getItem("idgie_bcbsal_token");
+    if (!token) return;
+    setBcbsalLoading(true);
+    setBcbsalError("");
+    try {
+      const res = await fetch("/.netlify/functions/bcbsal", {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setBcbsalData(data);
+    } catch (e) {
+      setBcbsalError("Could not load BCBSAL data — try reconnecting");
+    }
+    setBcbsalLoading(false);
+  };
+
+  // Handle BCBSAL OAuth callback
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("code");
+    const state = params.get("state");
+    if (code && state) {
+      window.history.replaceState({}, "", window.location.pathname);
+      setBcbsalLoading(true);
+      const redirectUri = window.location.origin;
+      fetch("/.netlify/functions/bcbsal?code=" + code + "&redirect_uri=" + encodeURIComponent(redirectUri))
+        .then(r => r.json())
+        .then(data => {
+          if (data.access_token) {
+            localStorage.setItem("idgie_bcbsal_token", data.access_token);
+            setBcbsalConnected(true);
+            setBcbsalLoading(false);
+            loadBCBSALData();
+          } else {
+            setBcbsalError("Authorization failed: " + (data.error || "unknown error"));
+            setBcbsalLoading(false);
+          }
+        })
+        .catch(e => {
+          setBcbsalError("Connection error: " + e.message);
+          setBcbsalLoading(false);
+        });
+    }
+  }, []); // eslint-disable-line
+
+
+
 
   // AI insights
   const generateInsights = async () => {
@@ -545,7 +534,6 @@ Respond ONLY in valid JSON:
           {[
             { label: "Oura Ring", on: !!ouraData },
             { label: "BCBSAL", on: bcbsalConnected },
-            { label: "Lab Results", on: !!labSummary },
           ].map(s => (
             <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 7, padding: "3px 10px", fontSize: 12 }}>
               <span style={{ width: 5, height: 5, borderRadius: "50%", background: s.on ? TEAL : "#888780", flexShrink: 0 }} />
