@@ -214,7 +214,7 @@ export default function IdgieApp() {
   const [extendedData, setExtendedData] = useState([]);
 
   // BCBSAL state
-  const [bcbsalConnected, setBcbsalConnected] = useState(false);
+  const [bcbsalConnected, setBcbsalConnected] = useState(() => !!localStorage.getItem("idgie_bcbsal_token"));
   const [bcbsalData, setBcbsalData] = useState(null);
   const [bcbsalLoading, setBcbsalLoading] = useState(false);
   const [bcbsalError, setBcbsalError] = useState("");
@@ -296,15 +296,16 @@ export default function IdgieApp() {
 
   // BCBSAL helpers
   const connectBCBSAL = () => {
+    const redirectUri = window.location.origin;
     const params = new URLSearchParams({
       response_type: "code",
-      client_id: "idgie-app",
-      redirect_uri: window.location.origin,
+      client_id: "9akZZDwCKo0ZlxU2uag4je9zrDKpO8WToHjKBcZx",
+      redirect_uri: redirectUri,
       scope: "patient/*.read launch/patient openid fhirUser",
       state: Math.random().toString(36).slice(2),
-      aud: "https://api.bcbsal.com/fhir/r4",
+      aud: "https://api-bcbsal-uat.safhir.io/v1/api",
     });
-    window.location.href = `https://sso.bcbsal.com/oauth2/authorize?${params}`;
+    window.location.href = "https://api-bcbsal-uat.safhir.io/slapv3/o/pdex/authorize/?" + params.toString();
   };
 
   const loadBCBSALData = async () => {
@@ -324,6 +325,35 @@ export default function IdgieApp() {
     }
     setBcbsalLoading(false);
   };
+
+  // Handle BCBSAL OAuth callback
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("code");
+    const state = params.get("state");
+    if (code && state) {
+      window.history.replaceState({}, "", window.location.pathname);
+      setBcbsalLoading(true);
+      const redirectUri = window.location.origin;
+      fetch("/.netlify/functions/bcbsal?code=" + code + "&redirect_uri=" + encodeURIComponent(redirectUri))
+        .then(r => r.json())
+        .then(data => {
+          if (data.access_token) {
+            localStorage.setItem("idgie_bcbsal_token", data.access_token);
+            setBcbsalConnected(true);
+            setBcbsalLoading(false);
+            loadBCBSALData();
+          } else {
+            setBcbsalError("Authorization failed: " + (data.error || "unknown error"));
+            setBcbsalLoading(false);
+          }
+        })
+        .catch(e => {
+          setBcbsalError("Connection error: " + e.message);
+          setBcbsalLoading(false);
+        });
+    }
+  }, []); // eslint-disable-line
 
   const disconnectBCBSAL = () => {
     localStorage.removeItem("idgie_bcbsal_token");
@@ -333,15 +363,16 @@ export default function IdgieApp() {
 
   // BCBSAL helpers
   const connectBCBSAL = () => {
+    const redirectUri = window.location.origin;
     const params = new URLSearchParams({
       response_type: "code",
-      client_id: "idgie-app",
-      redirect_uri: window.location.origin,
+      client_id: "9akZZDwCKo0ZlxU2uag4je9zrDKpO8WToHjKBcZx",
+      redirect_uri: redirectUri,
       scope: "patient/*.read launch/patient openid fhirUser",
       state: Math.random().toString(36).slice(2),
-      aud: "https://api.bcbsal.com/fhir/r4",
+      aud: "https://api-bcbsal-uat.safhir.io/v1/api",
     });
-    window.location.href = `https://sso.bcbsal.com/oauth2/authorize?${params}`;
+    window.location.href = "https://api-bcbsal-uat.safhir.io/slapv3/o/pdex/authorize/?" + params.toString();
   };
 
   const loadBCBSALData = async () => {
@@ -361,6 +392,35 @@ export default function IdgieApp() {
     }
     setBcbsalLoading(false);
   };
+
+  // Handle BCBSAL OAuth callback
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("code");
+    const state = params.get("state");
+    if (code && state) {
+      window.history.replaceState({}, "", window.location.pathname);
+      setBcbsalLoading(true);
+      const redirectUri = window.location.origin;
+      fetch("/.netlify/functions/bcbsal?code=" + code + "&redirect_uri=" + encodeURIComponent(redirectUri))
+        .then(r => r.json())
+        .then(data => {
+          if (data.access_token) {
+            localStorage.setItem("idgie_bcbsal_token", data.access_token);
+            setBcbsalConnected(true);
+            setBcbsalLoading(false);
+            loadBCBSALData();
+          } else {
+            setBcbsalError("Authorization failed: " + (data.error || "unknown error"));
+            setBcbsalLoading(false);
+          }
+        })
+        .catch(e => {
+          setBcbsalError("Connection error: " + e.message);
+          setBcbsalLoading(false);
+        });
+    }
+  }, []); // eslint-disable-line
 
   const disconnectBCBSAL = () => {
     localStorage.removeItem("idgie_bcbsal_token");
