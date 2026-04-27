@@ -31,16 +31,16 @@ const weekData = [
 ];
 
 // ── Netlify function caller ──────────────────────────────────
-async function fetchOuraData() {
+async function fetchOuraData(days = 7) {
   const today = new Date().toISOString().split("T")[0];
-  const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().split("T")[0];
+  const startDate = new Date(Date.now() - days * 86400000).toISOString().split("T")[0];
   const endpoints = ["daily_sleep", "daily_readiness", "daily_activity"];
   const keys = ["sleep", "readiness", "activity"];
   const results = {};
   for (let i = 0; i < endpoints.length; i++) {
     try {
       const res = await fetch(
-        `/.netlify/functions/oura?endpoint=${endpoints[i]}&start_date=${weekAgo}&end_date=${today}`
+        `/.netlify/functions/oura?endpoint=${endpoints[i]}&start_date=${startDate}&end_date=${today}`
       );
       results[keys[i]] = await res.json();
     } catch (e) {
@@ -51,33 +51,36 @@ async function fetchOuraData() {
 }
 
 function buildChartData(ouraData) {
-  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const sleepMap = {}, readinessMap = {}, activityMap = {};
   const sleepItems = Array.isArray(ouraData.sleep?.data) ? ouraData.sleep.data : [];
   const readinessItems = Array.isArray(ouraData.readiness?.data) ? ouraData.readiness.data : [];
   const activityItems = Array.isArray(ouraData.activity?.data) ? ouraData.activity.data : [];
-  sleepItems.forEach(d => {
-    if (!d?.day) return;
-    const day = days[new Date(d.day + "T12:00:00").getDay()];
-    sleepMap[day] = d.score || 0;
+
+  const sleepMap = {}, readinessMap = {}, activityMap = {};
+  sleepItems.forEach(d => { if (d?.day) sleepMap[d.day] = d.score || 0; });
+  readinessItems.forEach(d => { if (d?.day) readinessMap[d.day] = d.contributors?.hrv_balance || 0; });
+  activityItems.forEach(d => { if (d?.day) activityMap[d.day] = { steps: d.steps || 0, cal: d.total_calories || 0 }; });
+
+  // Get all unique dates sorted ascending
+  const allDates = [...new Set([
+    ...sleepItems.map(d => d.day),
+    ...readinessItems.map(d => d.day),
+    ...activityItems.map(d => d.day),
+  ])].filter(Boolean).sort();
+
+  return allDates.map(date => {
+    const d = new Date(date + "T12:00:00");
+    const label = allDates.length <= 7
+      ? d.toLocaleDateString("en-US", { weekday: "short" })
+      : d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    return {
+      day: label,
+      date,
+      hrv: readinessMap[date] || 0,
+      sleep: sleepMap[date] || 0,
+      steps: activityMap[date]?.steps || 0,
+      cal: activityMap[date]?.cal || 0,
+    };
   });
-  readinessItems.forEach(d => {
-    if (!d?.day) return;
-    const day = days[new Date(d.day + "T12:00:00").getDay()];
-    readinessMap[day] = d.contributors?.hrv_balance || 0;
-  });
-  activityItems.forEach(d => {
-    if (!d?.day) return;
-    const day = days[new Date(d.day + "T12:00:00").getDay()];
-    activityMap[day] = { steps: d.steps || 0, cal: d.total_calories || 0 };
-  });
-  return ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(day => ({
-    day,
-    hrv: readinessMap[day] || 0,
-    sleep: sleepMap[day] || 0,
-    steps: activityMap[day]?.steps || 0,
-    cal: activityMap[day]?.cal || 0,
-  }));
 }
 
 // ── Simple SVG charts ────────────────────────────────────────
@@ -207,6 +210,8 @@ export default function IdgieApp() {
 
   // Trend chart
   const [activeMetric, setActiveMetric] = useState("hrv");
+  const [trendDays, setTrendDays] = useState(7);
+  const [extendedData, setExtendedData] = useState([]);
 
   // BCBSAL state
   const [bcbsalConnected, setBcbsalConnected] = useState(false);
@@ -214,11 +219,7 @@ export default function IdgieApp() {
   const [bcbsalLoading, setBcbsalLoading] = useState(false);
   const [bcbsalError, setBcbsalError] = useState("");
 
-  // Lab results state
-  const [analyzingLabs, setAnalyzingLabs] = useState(false);
-  const [labSummary, setLabSummary] = useState(null);
-  const [labError, setLabError] = useState("");
-  const labRef = useRef();
+
 
   // Profile
   const [profile] = useState({
@@ -292,6 +293,43 @@ export default function IdgieApp() {
   const lostKg = (startKg - latestKg).toFixed(1);
   const toGoal = Math.max(0, latestKg - goalKg).toFixed(1);
   const pct = Math.min(100, Math.max(0, Math.round(((startKg - latestKg) / Math.max(startKg - goalKg, 0.1)) * 100)));
+
+  // BCBSAL helpers
+  const connectBCBSAL = () => {
+    const params = new URLSearchParams({
+      response_type: "code",
+      client_id: "idgie-app",
+      redirect_uri: window.location.origin,
+      scope: "patient/*.read launch/patient openid fhirUser",
+      state: Math.random().toString(36).slice(2),
+      aud: "https://api.bcbsal.com/fhir/r4",
+    });
+    window.location.href = `https://sso.bcbsal.com/oauth2/authorize?${params}`;
+  };
+
+  const loadBCBSALData = async () => {
+    const token = localStorage.getItem("idgie_bcbsal_token");
+    if (!token) return;
+    setBcbsalLoading(true);
+    setBcbsalError("");
+    try {
+      const res = await fetch("/.netlify/functions/bcbsal", {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setBcbsalData(data);
+    } catch (e) {
+      setBcbsalError("Could not load BCBSAL data — try reconnecting");
+    }
+    setBcbsalLoading(false);
+  };
+
+  const disconnectBCBSAL = () => {
+    localStorage.removeItem("idgie_bcbsal_token");
+    setBcbsalConnected(false);
+    setBcbsalData(null);
+  };
 
   // BCBSAL helpers
   const connectBCBSAL = () => {
@@ -450,6 +488,7 @@ Respond ONLY in valid JSON:
   const navItems = [
     { id: "dashboard", label: "Dashboard", sym: "◉" },
     { id: "weight", label: "Weight log", sym: "⊡" },
+    { id: "correlation", label: "Correlation", sym: "⋈" },
     { id: "records", label: "Health records", sym: "≡" },
     { id: "insights", label: "AI insights", sym: "✦" },
   ];
@@ -558,7 +597,17 @@ Respond ONLY in valid JSON:
             {/* Trend chart */}
             <div style={{ ...card, marginBottom: 18 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                <span style={{ fontSize: 13, fontWeight: 500 }}>7-day trends</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <span style={{ fontSize: 13, fontWeight: 500 }}>Oura trends</span>
+                  <div style={{ display: "flex", gap: 4 }}>
+                    {[7, 30, 90].map(d => (
+                      <button key={d} onClick={() => handleTrendDaysChange(d)}
+                        style={{ padding: "2px 10px", borderRadius: 20, border: `0.5px solid ${trendDays === d ? TEAL : "var(--color-border-tertiary)"}`, background: trendDays === d ? TEAL_L : "transparent", color: trendDays === d ? TEAL_D : "var(--color-text-secondary)", fontSize: 11, cursor: "pointer", fontFamily: "var(--font-sans)" }}>
+                        {d}d
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <div style={{ display: "flex", gap: 5 }}>
                   {metrics.map(m => (
                     <button key={m.key} onClick={() => setActiveMetric(m.key)}
@@ -568,7 +617,7 @@ Respond ONLY in valid JSON:
                   ))}
                 </div>
               </div>
-              <SimpleLineChart data={chartData} dataKey={activeMetric} color={activeM.color} />
+              <SimpleLineChart data={trendDays === 7 ? chartData : extendedData} dataKey={activeMetric} color={activeM.color} />
             </div>
 
             {/* Weight summary */}
@@ -772,88 +821,6 @@ Respond ONLY in valid JSON:
               {bcbsalError && <div style={{ fontSize: 12, color: RED, marginTop: 10 }}>{bcbsalError}</div>}
             </div>
 
-            {/* Lab Results Card */}
-            <div style={card}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
-                <div>
-                  <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>Lab Results</div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: labSummary ? TEAL : BLUE, display: "inline-block" }} />
-                    <span style={{ fontSize: 11, color: labSummary ? TEAL : BLUE }}>
-                      {labSummary ? `Labs from ${labSummary.labDate} loaded` : "Upload a lab results PDF"}
-                    </span>
-                  </div>
-                </div>
-                <button onClick={() => labRef.current?.click()}
-                  style={{ padding: "5px 14px", border: `0.5px solid ${BLUE}`, borderRadius: 20, background: `${BLUE}18`, color: BLUE, fontSize: 11, cursor: "pointer", fontFamily: "var(--font-sans)" }}>
-                  {labSummary ? "Upload new results →" : "Upload lab PDF →"}
-                </button>
-                <input ref={labRef} type="file" accept="application/pdf,image/*" style={{ display: "none" }} onChange={handleLabUpload} />
-              </div>
-
-              <p style={{ fontSize: 12, color: "var(--color-text-secondary)", margin: "0 0 12px", lineHeight: 1.6 }}>
-                Upload a lab results PDF or photo. IDGIE reads every value, flags anything outside normal range, and connects the results to your specific health conditions and goals. If your PDF is scanned, try uploading a clear photo instead.
-              </p>
-
-              {analyzingLabs && (
-                <div style={{ textAlign: "center", padding: "20px 0", color: BLUE, fontSize: 13 }}>◌ Reading your lab results...</div>
-              )}
-
-              {labError && (
-                <div style={{ fontSize: 12, color: RED, padding: "10px 0" }}>{labError}</div>
-              )}
-
-              {labSummary && !labSummary.error && (
-                <div style={{ background: "var(--color-background-secondary)", borderRadius: "var(--border-radius-md)", padding: 16 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 14 }}>
-                    <div style={{ fontSize: 13, fontWeight: 500 }}>Labs — {labSummary.labDate}</div>
-                    <div style={{ fontSize: 11, color: "var(--color-text-secondary)" }}>{labSummary.provider}</div>
-                  </div>
-
-                  {/* Lab values table */}
-                  <div style={{ marginBottom: 14 }}>
-                    <div style={{ fontSize: 9, color: "var(--color-text-tertiary)", fontWeight: 500, marginBottom: 8 }}>LAB VALUES</div>
-                    {labSummary.results?.map((r, i) => (
-                      <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderTop: i > 0 ? "0.5px solid var(--color-border-tertiary)" : "none" }}>
-                        <span style={{ fontSize: 12, color: "var(--color-text-primary)" }}>{r.name}</span>
-                        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                          <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 500, color: r.status === "normal" ? TEAL : r.status === "critical" ? RED : AMBER }}>
-                            {r.value} {r.unit}
-                          </span>
-                          <span style={{ fontSize: 10, color: "var(--color-text-tertiary)", minWidth: 80 }}>{r.normalRange}</span>
-                          {r.status !== "normal" && (
-                            <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 8, background: r.status === "critical" ? `${RED}20` : `${AMBER}20`, color: r.status === "critical" ? RED : AMBER, fontWeight: 500 }}>
-                              {r.status.toUpperCase()}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {labSummary.flagged?.length > 0 && (
-                    <div style={{ borderLeft: `3px solid ${RED}`, paddingLeft: 10, marginBottom: 12 }}>
-                      <div style={{ fontSize: 9, color: RED, fontWeight: 500, marginBottom: 4 }}>FLAGGED VALUES</div>
-                      {labSummary.flagged.map((f, i) => <div key={i} style={{ fontSize: 12, color: "var(--color-text-primary)", marginBottom: 2 }}>· {f}</div>)}
-                    </div>
-                  )}
-
-                  {labSummary.relevantToGoals && (
-                    <div style={{ borderLeft: `3px solid ${TEAL}`, paddingLeft: 10, marginBottom: 12 }}>
-                      <div style={{ fontSize: 9, color: TEAL, fontWeight: 500, marginBottom: 3 }}>RELEVANT TO YOUR GOALS</div>
-                      <div style={{ fontSize: 12, color: "var(--color-text-primary)", lineHeight: 1.5 }}>{labSummary.relevantToGoals}</div>
-                    </div>
-                  )}
-
-                  {labSummary.recommendations?.length > 0 && (
-                    <div style={{ borderLeft: `3px solid ${PURPLE}`, paddingLeft: 10 }}>
-                      <div style={{ fontSize: 9, color: PURPLE, fontWeight: 500, marginBottom: 4 }}>RECOMMENDATIONS</div>
-                      {labSummary.recommendations.map((r, i) => <div key={i} style={{ fontSize: 12, color: "var(--color-text-primary)", marginBottom: 2 }}>· {r}</div>)}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
           </div>
         )}
 
