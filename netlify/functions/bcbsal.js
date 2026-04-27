@@ -1,78 +1,90 @@
 const https = require("https");
+const querystring = require("querystring");
 
-function httpsGet(url, headers) {
+const CLIENT_ID = process.env.BCBSAL_CLIENT_ID;
+const CLIENT_SECRET = process.env.BCBSAL_CLIENT_SECRET;
+const TOKEN_HOST = "api-bcbsal-uat.safhir.io";
+const TOKEN_PATH = "/slapv3/o/pdex/token/";
+const FHIR_HOST = "api-bcbsal-uat.safhir.io";
+const FHIR_PATH = "/v1/api";
+
+function httpsRequest(hostname, path, method, headers, body) {
   return new Promise((resolve, reject) => {
-    https.get(url, { headers: { ...headers, "User-Agent": "IDGIE-App" } }, (res) => {
+    const req = https.request({ hostname, path, method, headers }, (res) => {
       let data = "";
       res.on("data", chunk => { data += chunk; });
       res.on("end", () => {
-        try { resolve(JSON.parse(data)); }
-        catch (e) { reject(e); }
+        try { resolve({ status: res.statusCode, body: JSON.parse(data) }); }
+        catch (e) { resolve({ status: res.statusCode, body: data }); }
       });
-    }).on("error", reject);
+    });
+    req.on("error", reject);
+    if (body) req.write(body);
+    req.end();
   });
 }
 
 exports.handler = async (event) => {
-  const authHeader = event.headers.authorization || event.headers.Authorization || "";
-  const token = authHeader.replace("Bearer ", "");
+  const corsHeaders = { "Access-Control-Allow-Origin": "*" };
 
-  if (!token) {
-    return {
-      statusCode: 401,
-      body: JSON.stringify({ error: "No token provided" }),
-    };
+  // Step 1: Exchange auth code for token
+  if (event.queryStringParameters && event.queryStringParameters.code) {
+    const code = event.queryStringParameters.code;
+    const redirectUri = event.queryStringParameters.redirect_uri || "";
+    const body = querystring.stringify({
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: redirectUri,
+      client_id: CLIENT_ID,
+      client_secret: CLIENT_SECRET,
+    });
+    try {
+      const res = await httpsRequest(TOKEN_HOST, TOKEN_PATH, "POST", {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Content-Length": Buffer.byteLength(body),
+      }, body);
+      if (res.body.access_token) {
+        return { statusCode: 200, headers: corsHeaders, body: JSON.stringify({ access_token: res.body.access_token }) };
+      }
+      return { statusCode: 400, headers: corsHeaders, body: JSON.stringify({ error: "Token exchange failed", detail: res.body }) };
+    } catch (e) {
+      return { statusCode: 500, headers: corsHeaders, body: JSON.stringify({ error: e.message }) };
+    }
   }
 
-  const BASE = "https://api.bcbsal.com/fhir/r4";
-  const headers = {
-    Authorization: `Bearer ${token}`,
-    Accept: "application/fhir+json",
-  };
+  // Step 2: Fetch FHIR data
+  const authHeader = (event.headers && (event.headers.authorization || event.headers.Authorization)) || "";
+  const token = authHeader.replace("Bearer ", "").trim();
+  if (!token) return { statusCode: 401, headers: corsHeaders, body: JSON.stringify({ error: "No token provided" }) };
+
+  const fhirHeaders = { Authorization: "Bearer " + token, Accept: "application/fhir+json" };
 
   try {
-    // Fetch coverage, claims, and care gaps in parallel
-    const [coverageRes, claimsRes, conditionsRes] = await Promise.all([
-      httpsGet(`${BASE}/Coverage?_count=1`, headers).catch(() => null),
-      httpsGet(`${BASE}/ExplanationOfBenefit?_count=10&_sort=-created`, headers).catch(() => null),
-      httpsGet(`${BASE}/Condition?_count=20`, headers).catch(() => null),
+    const [coverageRes, eobRes] = await Promise.all([
+      httpsRequest(FHIR_HOST, FHIR_PATH + "/Coverage", "GET", fhirHeaders),
+      httpsRequest(FHIR_HOST, FHIR_PATH + "/ExplanationOfBenefit?_count=10&_sort=-created", "GET", fhirHeaders),
     ]);
 
-    // Parse coverage
-    const coverageEntry = coverageRes?.entry?.[0]?.resource;
+    const coverageEntry = coverageRes.body && coverageRes.body.entry && coverageRes.body.entry[0] && coverageRes.body.entry[0].resource;
     const coverage = coverageEntry ? {
-      plan: coverageEntry.class?.find(c => c.type?.coding?.[0]?.code === "plan")?.name || "BCBSAL",
-      memberId: coverageEntry.subscriberId || "—",
+      plan: (coverageEntry.class && coverageEntry.class.find(function(c) { return c.type && c.type.coding && c.type.coding[0] && c.type.coding[0].code === "plan"; }) || {}).name || "BCBSAL",
+      memberId: coverageEntry.subscriberId || (coverageEntry.identifier && coverageEntry.identifier[0] && coverageEntry.identifier[0].value) || "---",
       status: coverageEntry.status || "active",
-    } : null;
+    } : { plan: "BCBSAL", memberId: "---", status: "active" };
 
-    // Parse claims/EOBs
-    const claims = (claimsRes?.entry || []).map(e => {
+    const claims = ((eobRes.body && eobRes.body.entry) || []).map(function(e) {
       const r = e.resource;
       return {
-        provider: r.careTeam?.[0]?.provider?.display || r.insurer?.display || "Provider",
-        date: r.created?.split("T")[0] || "—",
-        type: r.type?.coding?.[0]?.display || "Claim",
-        amount: r.total?.find(t => t.category?.coding?.[0]?.code === "submitted")?.amount?.value?.toFixed(2) || "—",
-        status: r.status || "—",
+        provider: (r.careTeam && r.careTeam[0] && r.careTeam[0].provider && r.careTeam[0].provider.display) || (r.provider && r.provider.display) || "Provider",
+        date: (r.created && r.created.split("T")[0]) || (r.billablePeriod && r.billablePeriod.start && r.billablePeriod.start.split("T")[0]) || "---",
+        type: (r.type && r.type.coding && r.type.coding[0] && r.type.coding[0].display) || "Claim",
+        amount: ((r.total && r.total.find(function(t) { return t.category && t.category.coding && ["submitted","charged"].includes(t.category.coding[0] && t.category.coding[0].code); })) || {}).amount && ((r.total.find(function(t) { return t.category && t.category.coding && ["submitted","charged"].includes(t.category.coding[0] && t.category.coding[0].code); })).amount.value || 0).toFixed(2) || "---",
+        status: r.status || "---",
       };
     });
 
-    // Parse conditions as care gaps
-    const careGaps = (conditionsRes?.entry || [])
-      .map(e => e.resource?.code?.coding?.[0]?.display || e.resource?.code?.text)
-      .filter(Boolean)
-      .slice(0, 5);
-
-    return {
-      statusCode: 200,
-      headers: { "Access-Control-Allow-Origin": "*" },
-      body: JSON.stringify({ coverage, claims, careGaps }),
-    };
+    return { statusCode: 200, headers: corsHeaders, body: JSON.stringify({ coverage, claims, careGaps: [] }) };
   } catch (e) {
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: e.message }),
-    };
+    return { statusCode: 500, headers: corsHeaders, body: JSON.stringify({ error: e.message }) };
   }
 };
