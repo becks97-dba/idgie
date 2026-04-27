@@ -294,38 +294,6 @@ export default function IdgieApp() {
   const toGoal = Math.max(0, latestKg - goalKg).toFixed(1);
   const pct = Math.min(100, Math.max(0, Math.round(((startKg - latestKg) / Math.max(startKg - goalKg, 0.1)) * 100)));
 
-  // BCBSAL helpers
-  const connectBCBSAL = () => {
-    const redirectUri = window.location.origin;
-    const params = new URLSearchParams({
-      response_type: "code",
-      client_id: "9akZZDwCKo0ZlxU2uag4je9zrDKpO8WToHjKBcZx",
-      redirect_uri: redirectUri,
-      scope: "patient/*.read launch/patient openid fhirUser",
-      state: Math.random().toString(36).slice(2),
-      aud: "https://api-bcbsal-uat.safhir.io/v1/api",
-    });
-    window.location.href = "https://api-bcbsal-uat.safhir.io/slapv3/o/pdex/authorize/?" + params.toString();
-  };
-
-  const loadBCBSALData = async () => {
-    const token = localStorage.getItem("idgie_bcbsal_token");
-    if (!token) return;
-    setBcbsalLoading(true);
-    setBcbsalError("");
-    try {
-      const res = await fetch("/.netlify/functions/bcbsal", {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      setBcbsalData(data);
-    } catch (e) {
-      setBcbsalError("Could not load BCBSAL data — try reconnecting");
-    }
-    setBcbsalLoading(false);
-  };
-
   // Handle BCBSAL OAuth callback
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -422,11 +390,7 @@ export default function IdgieApp() {
     }
   }, []); // eslint-disable-line
 
-  const disconnectBCBSAL = () => {
-    localStorage.removeItem("idgie_bcbsal_token");
-    setBcbsalConnected(false);
-    setBcbsalData(null);
-  };
+
 
   // Lab results PDF — tries document mode first, falls back to image mode for scanned PDFs
   const handleLabUpload = async (e) => {
