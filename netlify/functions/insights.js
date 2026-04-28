@@ -40,7 +40,7 @@ Respond ONLY in valid JSON with no markdown fences:
 
   const body = JSON.stringify({
     model: "claude-sonnet-4-20250514",
-    max_tokens: 1000,
+    max_tokens: 2000,
     messages: [{ role: "user", content: prompt }],
   });
 
