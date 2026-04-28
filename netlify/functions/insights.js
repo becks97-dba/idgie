@@ -66,7 +66,7 @@ Return this exact JSON structure with short values (under 20 words each):
           resolve({
             statusCode: 500,
             headers: corsHeaders,
-            body: JSON.stringify({ error: "Parse failed: " + e.message, raw: data.slice(0, 500) }),
+            body: JSON.stringify({ error: "Parse failed: " + e.message, raw: data }),
           });
         }
       });
