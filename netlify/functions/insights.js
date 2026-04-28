@@ -15,7 +15,7 @@ exports.handler = async (event) => {
     return {
       statusCode: 500,
       headers: corsHeaders,
-      body: JSON.stringify({ error: "Anthropic API key not configured in Netlify environment variables" }),
+      body: JSON.stringify({ error: "API key not configured" }),
     };
   }
 
@@ -26,21 +26,18 @@ exports.handler = async (event) => {
     return { statusCode: 400, headers: corsHeaders, body: JSON.stringify({ error: "Invalid request body" }) };
   }
 
-  const prompt = `You are a personal health AI. Generate personalized weekly insights.
-Profile: ${d.conditions} | Goals: ${d.goals} | Meds: ${d.medications}
-Latest Oura data:
-- Sleep score: ${d.sleepScore || "N/A"}
-- HRV balance: ${d.hrv || "N/A"}
-- Readiness score: ${d.readiness || "N/A"}
-- Steps today: ${d.steps || "N/A"}
-- Calories today: ${d.calories || "N/A"}
-Weight: ${d.latestKg}kg current, started ${d.startKg}kg, goal ${d.goalKg}kg, lost ${d.lostKg}kg, ${d.toGoal}kg to go
-Respond ONLY in valid JSON with no markdown fences:
-{"overallScore":number,"headline":"string","topWin":"string","topConcern":"string","actionItems":["string","string","string"],"trendNarrative":"string"}`;
+  const prompt = `Health AI insights. Respond ONLY with valid JSON, nothing else, no markdown.
+
+Patient: ${d.conditions}. Goals: ${d.goals}. Meds: ${d.medications}.
+Sleep: ${d.sleepScore||"?"}, HRV: ${d.hrv||"?"}, Readiness: ${d.readiness||"?"}, Steps: ${d.steps||"?"}, Cal: ${d.calories||"?"}.
+Weight: ${d.latestKg}kg now, was ${d.startKg}kg, goal ${d.goalKg}kg, lost ${d.lostKg}kg, ${d.toGoal}kg to go.
+
+Return this exact JSON structure with short values (under 20 words each):
+{"overallScore":75,"headline":"One line summary","topWin":"Biggest positive","topConcern":"Main concern","actionItems":["Action 1","Action 2","Action 3"],"trendNarrative":"Two sentence narrative"}`;
 
   const body = JSON.stringify({
     model: "claude-sonnet-4-20250514",
-    max_tokens: 2000,
+    max_tokens: 512,
     messages: [{ role: "user", content: prompt }],
   });
 
@@ -64,29 +61,19 @@ Respond ONLY in valid JSON with no markdown fences:
           const text = response.content?.find(b => b.type === "text")?.text || "";
           const clean = text.replace(/```json|```/g, "").trim();
           const insights = JSON.parse(clean);
-          resolve({
-            statusCode: 200,
-            headers: corsHeaders,
-            body: JSON.stringify(insights),
-          });
+          resolve({ statusCode: 200, headers: corsHeaders, body: JSON.stringify(insights) });
         } catch (e) {
           resolve({
             statusCode: 500,
             headers: corsHeaders,
-            body: JSON.stringify({ error: "Failed to parse Claude response: " + e.message, raw: data.slice(0, 200) }),
+            body: JSON.stringify({ error: "Parse failed: " + e.message, raw: data.slice(0, 500) }),
           });
         }
       });
     });
-
     req.on("error", (e) => {
-      resolve({
-        statusCode: 500,
-        headers: corsHeaders,
-        body: JSON.stringify({ error: "Network error: " + e.message }),
-      });
+      resolve({ statusCode: 500, headers: corsHeaders, body: JSON.stringify({ error: e.message }) });
     });
-
     req.write(body);
     req.end();
   });
