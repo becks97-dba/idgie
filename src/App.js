@@ -93,19 +93,22 @@ function SimpleLineChart({ data, dataKey, color }) {
   const iw = w - pad.left - pad.right;
   const ih = h - pad.top - pad.bottom;
   const activeData = data.filter(d => d[dataKey] > 0);
-  const x = i => pad.left + (i / Math.max(activeData.length - 1, 1)) * iw;
+  const n = activeData.length;
+  // Show at most 8 labels, evenly spaced
+  const labelStep = Math.ceil(n / 8);
+  const x = i => pad.left + (i / Math.max(n - 1, 1)) * iw;
   const y = v => pad.top + ih - ((v - min) / range) * ih;
   const points = activeData.map((d, i) => `${x(i)},${y(d[dataKey])}`).join(" ");
-  const area = activeData.length > 1
-    ? `M${x(0)},${y(activeData[0][dataKey])} ` + activeData.map((d, i) => `L${x(i)},${y(d[dataKey])}`).join(" ") + ` L${x(activeData.length - 1)},${pad.top + ih} L${x(0)},${pad.top + ih} Z`
+  const area = n > 1
+    ? `M${x(0)},${y(activeData[0][dataKey])} ` + activeData.map((d, i) => `L${x(i)},${y(d[dataKey])}`).join(" ") + ` L${x(n - 1)},${pad.top + ih} L${x(0)},${pad.top + ih} Z`
     : "";
   return (
     <svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ overflow: "visible" }}>
       {[0, 1, 2, 3].map(i => <line key={i} x1={pad.left} x2={w - pad.right} y1={pad.top + (ih / 3) * i} y2={pad.top + (ih / 3) * i} stroke="rgba(128,128,128,0.15)" strokeDasharray="4 4" />)}
       {area && <path d={area} fill={color} fillOpacity={0.15} />}
-      {activeData.length > 1 && <polyline points={points} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" />}
-      {activeData.map((d, i) => <circle key={i} cx={x(i)} cy={y(d[dataKey])} r={3} fill={color} />)}
-      {activeData.map((d, i) => <text key={i} x={x(i)} y={h - 4} textAnchor="middle" fontSize={10} fill="#888">{d.day}</text>)}
+      {n > 1 && <polyline points={points} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" />}
+      {activeData.map((d, i) => <circle key={i} cx={x(i)} cy={y(d[dataKey])} r={n > 30 ? 2 : 3} fill={color} />)}
+      {activeData.map((d, i) => i % labelStep === 0 ? <text key={i} x={x(i)} y={h - 4} textAnchor="middle" fontSize={10} fill="#888">{d.day}</text> : null)}
       {[min, Math.round((min + max) / 2), max].map((v, i) => <text key={i} x={pad.left - 6} y={y(v) + 4} textAnchor="end" fontSize={10} fill="#888">{Math.round(v)}</text>)}
     </svg>
   );
