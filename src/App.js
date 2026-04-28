@@ -407,7 +407,7 @@ export default function IdgieApp() {
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       setInsights(data);
-    } catch { setInsights({ error: true }); }
+    } catch (e) { setInsights({ error: true, message: e.message }); }
     setLoadingInsights(false);
   };
 
@@ -857,7 +857,8 @@ export default function IdgieApp() {
 
             {insights?.error && (
               <div style={{ ...card, padding: 32, textAlign: "center" }}>
-                <div style={{ fontSize: 13, color: RED }}>Could not generate insights — check your Anthropic API key</div>
+                <div style={{ fontSize: 13, color: RED, marginBottom: 8 }}>Could not generate insights</div>
+                <div style={{ fontSize: 11, color: "var(--color-text-tertiary)" }}>{insights.message || "Unknown error"}</div>
               </div>
             )}
 
