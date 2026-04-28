@@ -271,6 +271,26 @@ export default function IdgieApp() {
     setOuraLoading(false);
   };
 
+  const refreshOura = () => loadOuraData(true);
+
+  const loadExtendedData = async (days) => {
+    setOuraLoading(true);
+    try {
+      const data = await fetchOuraData(days);
+      setExtendedData(buildChartData(data));
+    } catch (e) {}
+    setOuraLoading(false);
+  };
+
+  const handleTrendDaysChange = (days) => {
+    setTrendDays(days);
+    if (days === 7) {
+      setExtendedData([]);
+    } else {
+      loadExtendedData(days);
+    }
+  };
+
   // Weight helpers
   const addWeight = () => {
     const kg = parseFloat(newWeightKg);
