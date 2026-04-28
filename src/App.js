@@ -369,36 +369,24 @@ export default function IdgieApp() {
       const todayActivity = ouraData?.activity?.data?.slice(-1)[0];
       const todayReadiness = ouraData?.readiness?.data?.slice(-1)[0];
       const todaySleep = ouraData?.sleep?.data?.slice(-1)[0];
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/.netlify/functions/insights", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": ANTHROPIC_API_KEY,
-          "anthropic-version": "2023-06-01",
-          "anthropic-dangerous-direct-browser-access": "true",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
-          messages: [{
-            role: "user",
-            content: `You are a personal health AI. Generate personalized weekly insights.
-Profile: ${profile.conditions} | Goals: ${profile.goals} | Meds: ${profile.medications}
-Latest Oura data:
-- Sleep score: ${todaySleep?.score || "N/A"}
-- HRV balance: ${todayReadiness?.contributors?.hrv_balance || "N/A"}
-- Readiness score: ${todayReadiness?.score || "N/A"}
-- Steps today: ${todayActivity?.steps || "N/A"}
-- Calories today: ${todayActivity?.total_calories || "N/A"}
-Weight trend: ${latestKg}kg current, started at ${startKg}kg, goal ${goalKg}kg (lost ${lostKg}kg, ${toGoal}kg to go)
-Respond ONLY in valid JSON:
-{"overallScore":number,"headline":"string","topWin":"string","topConcern":"string","actionItems":["string","string","string"],"trendNarrative":"string"}`
-          }]
+          conditions: profile.conditions,
+          goals: profile.goals,
+          medications: profile.medications,
+          sleepScore: todaySleep?.score,
+          hrv: todayReadiness?.contributors?.hrv_balance,
+          readiness: todayReadiness?.score,
+          steps: todayActivity?.steps,
+          calories: todayActivity?.total_calories,
+          latestKg, startKg, goalKg, lostKg, toGoal,
         }),
       });
       const data = await res.json();
-      const text = data.content?.find(b => b.type === "text")?.text || "";
-      setInsights(JSON.parse(text.replace(/```json|```/g, "").trim()));
+      if (data.error) throw new Error(data.error);
+      setInsights(data);
     } catch { setInsights({ error: true }); }
     setLoadingInsights(false);
   };
@@ -738,6 +726,65 @@ Respond ONLY in valid JSON:
               {bcbsalError && <div style={{ fontSize: 12, color: RED, marginTop: 10 }}>{bcbsalError}</div>}
             </div>
 
+          </div>
+        )}
+
+        {/* ─── CORRELATION ─── */}
+        {nav === "correlation" && (
+          <div>
+            <h2 style={{ margin: "0 0 2px", fontSize: 20 }}>Health correlation</h2>
+            <p style={{ color: "var(--color-text-secondary)", margin: "0 0 20px", fontSize: 13 }}>Compare your Oura Ring metrics against your weight over the same time period to spot patterns</p>
+
+            <div style={{ ...card, marginBottom: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+                <span style={{ fontSize: 13, fontWeight: 500 }}>Weight vs Oura metrics</span>
+                <div style={{ display: "flex", gap: 4 }}>
+                  {[7, 30, 90].map(d => (
+                    <button key={d} onClick={() => handleTrendDaysChange(d)}
+                      style={{ padding: "2px 10px", borderRadius: 20, border: `0.5px solid ${trendDays === d ? TEAL : "var(--color-border-tertiary)"}`, background: trendDays === d ? TEAL_L : "transparent", color: trendDays === d ? TEAL_D : "var(--color-text-secondary)", fontSize: 11, cursor: "pointer", fontFamily: "var(--font-sans)" }}>
+                      {d}d
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ marginBottom: 24 }}>
+                <div style={{ fontSize: 10, color: "var(--color-text-tertiary)", fontWeight: 500, marginBottom: 10 }}>WEIGHT (kg)</div>
+                <WeightChart data={weights} goalKg={goalKg} color={TEAL} />
+              </div>
+
+              <div style={{ borderTop: "0.5px solid var(--color-border-tertiary)", paddingTop: 20, marginBottom: 20 }}>
+                <div style={{ fontSize: 10, color: BLUE, fontWeight: 500, marginBottom: 10 }}>SLEEP SCORE (Oura)</div>
+                <SimpleLineChart data={trendDays === 7 ? chartData : extendedData} dataKey="sleep" color={BLUE} />
+              </div>
+
+              <div style={{ borderTop: "0.5px solid var(--color-border-tertiary)", paddingTop: 20, marginBottom: 20 }}>
+                <div style={{ fontSize: 10, color: TEAL, fontWeight: 500, marginBottom: 10 }}>HRV BALANCE (Oura)</div>
+                <SimpleLineChart data={trendDays === 7 ? chartData : extendedData} dataKey="hrv" color={TEAL} />
+              </div>
+
+              <div style={{ borderTop: "0.5px solid var(--color-border-tertiary)", paddingTop: 20 }}>
+                <div style={{ fontSize: 10, color: PURPLE, fontWeight: 500, marginBottom: 10 }}>STEPS (Oura)</div>
+                <SimpleLineChart data={trendDays === 7 ? chartData : extendedData} dataKey="steps" color={PURPLE} />
+              </div>
+            </div>
+
+            <div style={{ ...card, background: "var(--color-background-secondary)" }}>
+              <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 8 }}>How to read this</div>
+              <div style={{ fontSize: 12, color: "var(--color-text-secondary)", lineHeight: 1.7, marginBottom: 10 }}>
+                Look for weeks where your weight drops and check what your sleep and HRV looked like during that period.
+              </div>
+              {[
+                { color: TEAL, text: "Higher HRV → better recovery → more effective activity → faster weight loss" },
+                { color: BLUE, text: "Better sleep scores → lower cortisol → reduced cravings → easier calorie control" },
+                { color: PURPLE, text: "More steps → higher daily burn → accelerated progress toward your 70kg goal" },
+              ].map((item, i) => (
+                <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start", marginBottom: 6 }}>
+                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: item.color, flexShrink: 0, marginTop: 4 }} />
+                  <span style={{ fontSize: 12, color: "var(--color-text-secondary)", lineHeight: 1.5 }}>{item.text}</span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
